@@ -1,3 +1,5 @@
+#This project is no longer supported, if you need a solution with the same features but with native Kubernetes cluster support please check [selenosis](https://github.com/alcounit/selenosis)
+
 # Selenoid
 [![Build Status](https://travis-ci.org/aerokube/selenoid.svg?branch=master)](https://travis-ci.org/aerokube/selenoid)
 [![Coverage](https://codecov.io/github/aerokube/selenoid/coverage.svg)](https://codecov.io/gh/aerokube/selenoid)
