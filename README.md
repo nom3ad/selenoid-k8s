@@ -1,3 +1,9 @@
+> forked from aerokube/selenoid to have k8s support
+>
+> k8s integration code sourced from another fork: https://github.com/alcounit/selenoid4k8s
+>
+> See: also #[selenosis](https://github.com/alcounit/selenosis)
+
 # Selenoid
 [![Build Status](https://github.com/aerokube/selenoid/workflows/build/badge.svg)](https://github.com/aerokube/selenoid/actions?query=workflow%3Abuild)
 [![Coverage](https://codecov.io/github/aerokube/selenoid/coverage.svg)](https://codecov.io/gh/aerokube/selenoid)

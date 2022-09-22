@@ -68,12 +68,20 @@ type Container struct {
 	Ports     map[string]string `json:"exposedPorts,omitempty"`
 }
 
+type Pod struct {
+	ID            string `json:"id"`
+	IPAddress     string `json:"ip"`
+	Name          string `json:"podname"`
+	ContainerName string `json:"containername"`
+}
+
 // Session - holds session info
 type Session struct {
 	Quota     string
 	Caps      Caps
 	URL       *url.URL
 	Container *Container
+	Pod       *Pod
 	HostPort  HostPort
 	Origin    string
 	Cancel    func()
