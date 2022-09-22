@@ -9,8 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"time"
-
 	"github.com/aerokube/selenoid/session"
 	"github.com/docker/docker/api/types/container"
 )
@@ -65,7 +63,7 @@ type Browser struct {
 	Mem             string            `json:"mem,omitempty"`
 	Cpu             string            `json:"cpu,omitempty"`
 	PublishAllPorts bool              `json:"publishAllPorts,omitempty"`
-	Requirements    Resourses         `json:"resources,omitempty"`
+	Requirements    Resources         `json:"resources,omitempty"`
 }
 
 // Versions configuration
@@ -74,8 +72,8 @@ type Versions struct {
 	Versions map[string]*Browser `json:"versions"`
 }
 
-// Resourses configuration for pod
-type Resourses struct {
+// Resources configuration for pod
+type Resources struct {
 	Limits   map[string]string `json:"limits,omitempty"`
 	Requests map[string]string `json:"requests,omitempty"`
 }

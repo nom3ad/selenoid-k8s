@@ -754,8 +754,8 @@ func streamLogs(wsconn *websocket.Conn) {
 			Follow:     true,
 			Previous:   false,
 			Timestamps: false,
-		}).Context(wsconn.Request().Context())
-		r, err := req.Stream()
+		})
+		r, err := req.Stream(wsconn.Request().Context())
 		if err != nil {
 			log.Printf("[%d] [POD_LOGS_ERROR] [%s] [%v]", requestId, sess.Pod.Name, err)
 			return

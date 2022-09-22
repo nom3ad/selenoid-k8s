@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -54,7 +55,7 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 	requestID := k.RequestId
 	image := k.Service.Image.(string)
 	ns := k.Environment.NameSpace
-	container := parceImageName(image)
+	container := parseImageName(image)
 
 	v1Pod := &apiv1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -72,7 +73,7 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 					},
 					Env: getEnvVars(k.ServiceBase, k.Caps),
 
-					Resources: getResourses(k.ServiceBase),
+					Resources: getResources(k.ServiceBase),
 					Ports:     getContainerPort(),
 					VolumeMounts: []apiv1.VolumeMount{
 						{
@@ -101,7 +102,7 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 	podStartTime := time.Now()
 	log.Printf("[%d] [CREATING_POD] [%s] [%s]", requestID, image, ns)
 
-	podClient, err := client.CoreV1().Pods(ns).Create(v1Pod)
+	podClient, err := client.CoreV1().Pods(ns).Create(context.Background(), v1Pod, metav1.CreateOptions{})
 	pod := podClient.GetName()
 	if err != nil {
 		deletePod(pod, ns, client, requestID)
@@ -149,17 +150,17 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 func deletePod(name string, ns string, client *kubernetes.Clientset, requestID uint64) {
 	log.Printf("[%d] [DELETING_POD] [%s] [%s]", requestID, name, ns)
 	deletePolicy := metav1.DeletePropagationForeground
-	err := client.CoreV1().Pods(ns).Delete(name, &metav1.DeleteOptions{
+	err := client.CoreV1().Pods(ns).Delete(context.Background(), name, metav1.DeleteOptions{
 		PropagationPolicy: &deletePolicy,
 	})
 	if err != nil {
-		fmt.Errorf("delete pod: %v", err)
+		log.Printf("delete pod: %v", err)
 		return
 	}
 	log.Printf("[%d] [POD_DELETED] [%s] [%s]", requestID, name, ns)
 }
 
-func parceImageName(image string) (container string) {
+func parseImageName(image string) (container string) {
 	pref, err := regexp.Compile("[^a-zA-Z0-9]+")
 	if err != nil {
 		container = "selenoid_browser"
@@ -170,9 +171,9 @@ func parceImageName(image string) (container string) {
 
 func getHostIP(name string, ns string, client *kubernetes.Clientset) string {
 	ip := ""
-	pods, err := client.CoreV1().Pods(ns).List(metav1.ListOptions{})
+	pods, err := client.CoreV1().Pods(ns).List(context.Background(), metav1.ListOptions{})
 	if err != nil {
-		fmt.Errorf("pods list: %v", err)
+		fmt.Printf("pods list: %v", err)
 	}
 	for _, pod := range pods.Items {
 		if pod.Name == name {
@@ -203,7 +204,7 @@ func buildHostPort(ip string, caps session.Caps) session.HostPort {
 
 func waitForPodToBeReady(client *kubernetes.Clientset, pod *apiv1.Pod, ns, name string, timeout time.Duration) error {
 	status := pod.Status
-	w, err := client.CoreV1().Pods(ns).Watch(metav1.ListOptions{
+	w, err := client.CoreV1().Pods(ns).Watch(context.Background(), metav1.ListOptions{
 		FieldSelector: fields.OneTermEqualSelector("metadata.name", name).String(),
 	})
 	if err != nil {
@@ -231,16 +232,15 @@ func waitForPodToBeReady(client *kubernetes.Clientset, pod *apiv1.Pod, ns, name 
 	}
 	return nil
 }
-
 func getEnvVars(service ServiceBase, caps session.Caps) []apiv1.EnvVar {
 	envVar := []apiv1.EnvVar{
 		{
 			Name:  "TZ",
-			Value: fmt.Sprintf("%s", getTimeZone(service, caps)),
+			Value: getTimeZone(service, caps).String(),
 		},
 		{
 			Name:  "SCREEN_RESOLUTION",
-			Value: fmt.Sprintf("%s", caps.ScreenResolution),
+			Value: caps.ScreenResolution,
 		},
 		{
 			Name:  "ENABLE_VNC",
@@ -250,7 +250,7 @@ func getEnvVars(service ServiceBase, caps session.Caps) []apiv1.EnvVar {
 	return envVar
 }
 
-func getResourses(service ServiceBase) apiv1.ResourceRequirements {
+func getResources(service ServiceBase) apiv1.ResourceRequirements {
 	res := apiv1.ResourceRequirements{}
 	req := service.Service.Requirements
 	if len(req.Limits) != 0 {
@@ -315,19 +315,6 @@ func getContainerPort() []apiv1.ContainerPort {
 	fn(apiv1.ContainerPort{Name: "vnc", ContainerPort: vnc})
 	fn(apiv1.ContainerPort{Name: "devtools", ContainerPort: devtools})
 	return cp
-}
-
-func int64ToHuman(b int64) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.0f%ci", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
 func spitHostAlias(alias string) apiv1.HostAlias {
