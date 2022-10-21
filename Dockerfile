@@ -1,3 +1,4 @@
+ARG BUILDPLATFORM
 FROM --platform=$BUILDPLATFORM alpine:3
 
 RUN apk add -U ca-certificates tzdata mailcap && rm -Rf /var/cache/apk/*
