@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/url"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -22,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/runtime"
 	k8sJson "k8s.io/apimachinery/pkg/runtime/serializer/json"
 	"k8s.io/client-go/kubernetes"
 	k8s_config "sigs.k8s.io/controller-runtime/pkg/client/config"
@@ -53,7 +55,7 @@ var k8sObjYamlSerializer = k8sJson.NewSerializerWithOptions(
 )
 
 func getK8sClient() (*kubernetes.Clientset, error) {
-	config, err := k8s_config.GetConfig()
+	config, err := k8s_config.GetConfigWithContext(os.Getenv("KUBECONFIG_CONTEXT"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get k8s cluster config: %v", err)
 	}
@@ -72,19 +74,19 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 	}
 	requestID := k.RequestId
 	image := k.Service.Image.(string)
-	ns := k.Environment.OrchestratorOptions["k8sNamespace"]
-	container := parseImageName(image)
+	namespace := k.Environment.OrchestratorOptions["k8sNamespace"]
+	containerName := createContainerName(image)
 
 	v1Pod := &apiv1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: container,
-			Namespace:    ns,
+			GenerateName: containerName + "-",
+			Namespace:    namespace,
 			Labels:       getLabels(k.Service, k.Caps),
 		},
 		Spec: apiv1.PodSpec{
 			Containers: []apiv1.Container{
 				{
-					Name:  container,
+					Name:  containerName,
 					Image: image,
 					SecurityContext: &apiv1.SecurityContext{
 						Privileged: &k.Privileged,
@@ -124,33 +126,33 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 		}
 	}
 
-	var buf bytes.Buffer
-	_ = k8sObjYamlSerializer.Encode(v1Pod, &buf)
 	// podYaml, _ := yaml.Marshal(v1Pod)
-	log.Printf("[%d] [CREATING_POD] [%s] [%s] Pod=%s", requestID, image, ns, buf.String())
+	log.Printf("[%d] [CREATING_POD] [%s] [%s] Pod=%s", requestID, image, namespace, yamlifyObject(v1Pod))
 
 	podStartTime := time.Now()
-	podObj, err := k8sClient.CoreV1().Pods(ns).Create(context.Background(), v1Pod, metav1.CreateOptions{})
-	pod := podObj.GetName()
+	podObj, err := k8sClient.CoreV1().Pods(namespace).Create(context.Background(), v1Pod, metav1.CreateOptions{})
+	podName := podObj.GetName()
 	if err != nil {
-		deletePod(pod, ns, k8sClient, requestID)
+		deletePod(podName, namespace, k8sClient, requestID)
 		return nil, fmt.Errorf("start pod: %v", err)
 	}
 
-	if err := waitForPodToBeReady(k8sClient, podObj, ns, pod, k.StartupTimeout); err != nil {
-		deletePod(pod, ns, k8sClient, requestID)
+	if err := waitForPodToBeReady(k8sClient, namespace, podName, k.StartupTimeout); err != nil {
+		deletePod(podName, namespace, k8sClient, requestID)
 		return nil, fmt.Errorf("status pod: %v", err)
 	}
 
-	log.Printf("[%d] [POD_CREATED] [%s] [%s] [%.2fs]", requestID, pod, image, util.SecondsSince(podStartTime))
+	log.Printf("[%d] [POD_CREATED] [%s] [%s] [%.2fs]", requestID, podName, image, util.SecondsSince(podStartTime))
 
-	podIP := getPodIP(pod, ns, k8sClient)
+	podIP := getPodIP(podName, namespace, k8sClient)
 	hostPort := buildHostPort(podIP, k.Caps)
 
 	u := &url.URL{Scheme: "http", Host: hostPort.Selenium}
 
+	log.Printf("[%d] [POD_URL] [%s] [%s]", requestID, podName, u.String())
+
 	if err := wait(u.String(), k.StartupTimeout); err != nil {
-		deletePod(pod, ns, k8sClient, requestID)
+		deletePod(podName, namespace, k8sClient, requestID)
 	}
 
 	s := StartedService{
@@ -159,8 +161,8 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 			ID:            string(podObj.GetUID()),
 			IPAddress:     podIP,
 			Name:          podObj.GetName(),
-			ContainerName: container,
-			Namespace:     ns,
+			ContainerName: containerName,
+			Namespace:     namespace,
 		},
 		HostPort: session.HostPort{
 			Selenium:   hostPort.Selenium,
@@ -170,10 +172,16 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 			Devtools:   hostPort.Devtools,
 		},
 		Cancel: func() {
-			defer deletePod(pod, ns, k8sClient, requestID)
+			defer deletePod(podName, namespace, k8sClient, requestID)
 		},
 	}
 	return &s, nil
+}
+
+func yamlifyObject(o runtime.Object) string {
+	var buf bytes.Buffer
+	_ = k8sObjYamlSerializer.Encode(o, &buf)
+	return buf.String()
 }
 
 func deletePod(name string, ns string, k8sClient *kubernetes.Clientset, requestID uint64) {
@@ -189,7 +197,7 @@ func deletePod(name string, ns string, k8sClient *kubernetes.Clientset, requestI
 	log.Printf("[%d] [POD_DELETED] [%s] [%s]", requestID, name, ns)
 }
 
-func parseImageName(image string) (container string) {
+func createContainerName(image string) (container string) {
 	pref, err := regexp.Compile("[^a-zA-Z0-9]+")
 	if err != nil {
 		container = "selenoid_browser"
@@ -231,31 +239,47 @@ func buildHostPort(ip string, caps session.Caps) session.HostPort {
 	return hp
 }
 
-func waitForPodToBeReady(k8sClient *kubernetes.Clientset, pod *apiv1.Pod, ns, name string, timeout time.Duration) error {
-	status := pod.Status
-	w, err := k8sClient.CoreV1().Pods(ns).Watch(context.Background(), metav1.ListOptions{
-		FieldSelector: fields.OneTermEqualSelector("metadata.name", name).String(),
+func waitForPodToBeReady(k8sClient *kubernetes.Clientset, namespace, podName string, timeout time.Duration) error {
+
+	ctx := context.Background()
+	podObj, err := k8sClient.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+
+	status := podObj.Status
+
+	w, err := k8sClient.CoreV1().Pods(namespace).Watch(ctx, metav1.ListOptions{
+		FieldSelector: fields.OneTermEqualSelector("metadata.name", podName).String(),
 	})
 	if err != nil {
 		return err
 	}
-	func() {
-		for {
-			select {
-			case events, ok := <-w.ResultChan():
-				if !ok {
-					return
-				}
-				resp := events.Object.(*apiv1.Pod)
-				status = resp.Status
-				if resp.Status.Phase != apiv1.PodPending {
+	if podObj.Status.Phase == apiv1.PodPending {
+		startedAt := time.Now()
+		func() {
+			for {
+				select {
+				case events, ok := <-w.ResultChan():
+					if !ok {
+						return
+					}
+					if podObj, ok := events.Object.(*apiv1.Pod); ok {
+						status = podObj.Status
+						if podObj.Status.Phase != apiv1.PodPending {
+							w.Stop()
+						}
+					} else {
+						log.Printf("[UNHANDLED EVENT] [Pod=%s] [%s] Obj=%s", podName, events.Type, yamlifyObject(events.Object))
+					}
+				case <-time.After(timeout):
 					w.Stop()
+				case <-time.NewTicker(3 * time.Second).C:
+					log.Printf("[WAITING FOR POD] [Pod=%s] [%s] [%ss]", podName, status.Phase, time.Since(startedAt))
 				}
-			case <-time.After(timeout):
-				w.Stop()
 			}
-		}
-	}()
+		}()
+	}
 	if status.Phase != apiv1.PodRunning {
 		return fmt.Errorf("Pod is unavailable: %v", status.Phase)
 	}
