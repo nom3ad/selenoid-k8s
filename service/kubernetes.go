@@ -1,7 +1,9 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -20,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	k8sJson "k8s.io/apimachinery/pkg/runtime/serializer/json"
 	"k8s.io/client-go/kubernetes"
 	k8s_config "sigs.k8s.io/controller-runtime/pkg/client/config"
 )
@@ -39,6 +42,15 @@ type Kubernetes struct {
 	Environment
 	session.Caps
 }
+
+var k8sObjYamlSerializer = k8sJson.NewSerializerWithOptions(
+	k8sJson.DefaultMetaFactory, nil, nil,
+	k8sJson.SerializerOptions{
+		Yaml:   true,
+		Pretty: true,
+		Strict: true,
+	},
+)
 
 func getK8sClient() (*kubernetes.Clientset, error) {
 	config, err := k8s_config.GetConfig()
@@ -60,7 +72,7 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 	}
 	requestID := k.RequestId
 	image := k.Service.Image.(string)
-	ns := k.Environment.K8sNameSpace
+	ns := k.Environment.OrchestratorOptions["k8sNamespace"]
 	container := parseImageName(image)
 
 	v1Pod := &apiv1.Pod{
@@ -105,9 +117,19 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 		},
 	}
 
-	podStartTime := time.Now()
-	log.Printf("[%d] [CREATING_POD] [%s] [%s]", requestID, image, ns)
+	k8sPodSpecExtraOptions := k.Environment.OrchestratorOptions["k8sPodSpecExtraOptions"]
+	if k8sPodSpecExtraOptions != "" {
+		if json.Unmarshal([]byte(k8sPodSpecExtraOptions), &v1Pod.Spec) != nil {
+			return nil, fmt.Errorf("failed to parse k8sPodSpecExtraOptions: %v | %w", k8sPodSpecExtraOptions, err)
+		}
+	}
 
+	var buf bytes.Buffer
+	_ = k8sObjYamlSerializer.Encode(v1Pod, &buf)
+	// podYaml, _ := yaml.Marshal(v1Pod)
+	log.Printf("[%d] [CREATING_POD] [%s] [%s] Pod=%s", requestID, image, ns, buf.String())
+
+	podStartTime := time.Now()
 	podObj, err := k8sClient.CoreV1().Pods(ns).Create(context.Background(), v1Pod, metav1.CreateOptions{})
 	pod := podObj.GetName()
 	if err != nil {

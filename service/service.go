@@ -29,8 +29,8 @@ type Environment struct {
 	SaveAllLogs          bool
 	Privileged           bool
 	Orchestrator         string
-	// k8s specific
-	K8sNameSpace string
+
+	OrchestratorOptions map[string]string
 }
 
 const (

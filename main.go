@@ -63,7 +63,8 @@ var (
 	orchestrator             string
 
 	// k8s specific
-	k8sNameSpace string
+	k8sNamespace           string
+	k8sPodSpecExtraOptions string
 
 	startTime = time.Now()
 
@@ -100,7 +101,8 @@ func init() {
 	flag.BoolVar(&saveAllLogs, "save-all-logs", false, "Whether to save all logs without considering capabilities")
 	flag.DurationVar(&gracefulPeriod, "graceful-period", 300*time.Second, "graceful shutdown period in time.Duration format, e.g. 300s or 500ms")
 	flag.StringVar(&orchestrator, "orchestrator", "docker", "Container orchestrator: docker,kubernetes")
-	flag.StringVar(&k8sNameSpace, "k8s-namespace", "default", "Kubernetes namespace for running browser containers")
+	flag.StringVar(&k8sNamespace, "k8s-namespace", "default", "Kubernetes namespace for running browser containers")
+	flag.StringVar(&k8sPodSpecExtraOptions, "k8s-pod-spec-extra-options", "default", "Kubernetes Pod spec additional options as JSON string")
 	flag.Parse()
 
 	if version {
@@ -177,7 +179,10 @@ func init() {
 		Privileged:           !disablePrivileged,
 		Orchestrator:         orchestrator,
 
-		K8sNameSpace: k8sNameSpace,
+		OrchestratorOptions: map[string]string{
+			"k8sNamespace":           k8sNamespace,
+			"k8sPodSpecExtraOptions": k8sPodSpecExtraOptions,
+		},
 	}
 
 	log.Printf("[-] [INIT] [Selenoid is running with %s as orchestrator]", orchestrator)
