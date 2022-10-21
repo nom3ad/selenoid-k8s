@@ -15,12 +15,11 @@ import (
 	"github.com/aerokube/selenoid/session"
 	"github.com/aerokube/util"
 	apiv1 "k8s.io/api/core/v1"
-
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
+	k8s_config "sigs.k8s.io/controller-runtime/pkg/client/config"
 )
 
 const (
@@ -42,19 +41,21 @@ type Kubernetes struct {
 // StartWithCancel - Starter interface implementation
 func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 
-	config, err := rest.InClusterConfig()
+	config, err := k8s_config.GetConfig()
 	if err != nil {
-		return nil, fmt.Errorf("cluster config: %v", err)
+		return nil, fmt.Errorf("failed to get k8s cluster config: %v", err)
 	}
 
 	client, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		return nil, fmt.Errorf("cluster config: %v", err)
+		return nil, fmt.Errorf("failed to create k8s client: %v", err)
 	}
+
+	log.Printf("[KUBERNETES] client config: %v", config)
 
 	requestID := k.RequestId
 	image := k.Service.Image.(string)
-	ns := k.Environment.NameSpace
+	ns := k.Environment.K8sNameSpace
 	container := parseImageName(image)
 
 	v1Pod := &apiv1.Pod{
