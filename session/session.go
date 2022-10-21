@@ -73,6 +73,7 @@ type Pod struct {
 	IPAddress     string `json:"ip"`
 	Name          string `json:"podname"`
 	ContainerName string `json:"containername"`
+	Namespace     string `json:"namespace"`
 }
 
 // Session - holds session info

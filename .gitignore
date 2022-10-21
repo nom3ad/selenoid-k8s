@@ -5,3 +5,4 @@ selenoid.exe
 coverage.*
 .DS_Store
 .vscode
+tmp

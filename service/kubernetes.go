@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/url"
@@ -14,6 +15,7 @@ import (
 	"github.com/aerokube/selenoid/config"
 	"github.com/aerokube/selenoid/session"
 	"github.com/aerokube/util"
+	"golang.org/x/net/websocket"
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -38,21 +40,24 @@ type Kubernetes struct {
 	session.Caps
 }
 
-// StartWithCancel - Starter interface implementation
-func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
-
+func getK8sClient() (*kubernetes.Clientset, error) {
 	config, err := k8s_config.GetConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get k8s cluster config: %v", err)
 	}
-
-	client, err := kubernetes.NewForConfig(config)
+	k8sClient, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create k8s client: %v", err)
 	}
+	return k8sClient, nil
+}
 
-	log.Printf("[KUBERNETES] client config: %v", config)
-
+// StartWithCancel - Starter interface implementation
+func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
+	k8sClient, err := getK8sClient()
+	if err != nil {
+		return nil, err
+	}
 	requestID := k.RequestId
 	image := k.Service.Image.(string)
 	ns := k.Environment.K8sNameSpace
@@ -103,36 +108,37 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 	podStartTime := time.Now()
 	log.Printf("[%d] [CREATING_POD] [%s] [%s]", requestID, image, ns)
 
-	podClient, err := client.CoreV1().Pods(ns).Create(context.Background(), v1Pod, metav1.CreateOptions{})
-	pod := podClient.GetName()
+	podObj, err := k8sClient.CoreV1().Pods(ns).Create(context.Background(), v1Pod, metav1.CreateOptions{})
+	pod := podObj.GetName()
 	if err != nil {
-		deletePod(pod, ns, client, requestID)
+		deletePod(pod, ns, k8sClient, requestID)
 		return nil, fmt.Errorf("start pod: %v", err)
 	}
 
-	if err := waitForPodToBeReady(client, podClient, ns, pod, k.StartupTimeout); err != nil {
-		deletePod(pod, ns, client, requestID)
+	if err := waitForPodToBeReady(k8sClient, podObj, ns, pod, k.StartupTimeout); err != nil {
+		deletePod(pod, ns, k8sClient, requestID)
 		return nil, fmt.Errorf("status pod: %v", err)
 	}
 
 	log.Printf("[%d] [POD_CREATED] [%s] [%s] [%.2fs]", requestID, pod, image, util.SecondsSince(podStartTime))
 
-	podIP := getHostIP(pod, ns, client)
+	podIP := getPodIP(pod, ns, k8sClient)
 	hostPort := buildHostPort(podIP, k.Caps)
 
 	u := &url.URL{Scheme: "http", Host: hostPort.Selenium}
 
 	if err := wait(u.String(), k.StartupTimeout); err != nil {
-		deletePod(pod, ns, client, requestID)
+		deletePod(pod, ns, k8sClient, requestID)
 	}
 
 	s := StartedService{
 		Url: u,
 		Pod: &session.Pod{
-			ID:            string(podClient.GetUID()),
+			ID:            string(podObj.GetUID()),
 			IPAddress:     podIP,
-			Name:          podClient.GetName(),
+			Name:          podObj.GetName(),
 			ContainerName: container,
+			Namespace:     ns,
 		},
 		HostPort: session.HostPort{
 			Selenium:   hostPort.Selenium,
@@ -142,16 +148,16 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 			Devtools:   hostPort.Devtools,
 		},
 		Cancel: func() {
-			defer deletePod(pod, ns, client, requestID)
+			defer deletePod(pod, ns, k8sClient, requestID)
 		},
 	}
 	return &s, nil
 }
 
-func deletePod(name string, ns string, client *kubernetes.Clientset, requestID uint64) {
+func deletePod(name string, ns string, k8sClient *kubernetes.Clientset, requestID uint64) {
 	log.Printf("[%d] [DELETING_POD] [%s] [%s]", requestID, name, ns)
 	deletePolicy := metav1.DeletePropagationForeground
-	err := client.CoreV1().Pods(ns).Delete(context.Background(), name, metav1.DeleteOptions{
+	err := k8sClient.CoreV1().Pods(ns).Delete(context.Background(), name, metav1.DeleteOptions{
 		PropagationPolicy: &deletePolicy,
 	})
 	if err != nil {
@@ -170,9 +176,9 @@ func parseImageName(image string) (container string) {
 	return container
 }
 
-func getHostIP(name string, ns string, client *kubernetes.Clientset) string {
+func getPodIP(name string, ns string, k8sClient *kubernetes.Clientset) string {
 	ip := ""
-	pods, err := client.CoreV1().Pods(ns).List(context.Background(), metav1.ListOptions{})
+	pods, err := k8sClient.CoreV1().Pods(ns).List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		fmt.Printf("pods list: %v", err)
 	}
@@ -203,9 +209,9 @@ func buildHostPort(ip string, caps session.Caps) session.HostPort {
 	return hp
 }
 
-func waitForPodToBeReady(client *kubernetes.Clientset, pod *apiv1.Pod, ns, name string, timeout time.Duration) error {
+func waitForPodToBeReady(k8sClient *kubernetes.Clientset, pod *apiv1.Pod, ns, name string, timeout time.Duration) error {
 	status := pod.Status
-	w, err := client.CoreV1().Pods(ns).Watch(context.Background(), metav1.ListOptions{
+	w, err := k8sClient.CoreV1().Pods(ns).Watch(context.Background(), metav1.ListOptions{
 		FieldSelector: fields.OneTermEqualSelector("metadata.name", name).String(),
 	})
 	if err != nil {
@@ -324,4 +330,34 @@ func spitHostAlias(alias string) apiv1.HostAlias {
 		IP:        hostAlias[1],
 		Hostnames: []string{hostAlias[0]},
 	}
+}
+
+func StreamK8sPodLogs(requestId uint64, sess *session.Session, wsConn *websocket.Conn, sid string) error {
+	log.Printf("[%d] [POD_LOGS] [%s]", requestId, sess.Pod.Name)
+	k8sClient, err := getK8sClient()
+	if err != nil {
+		log.Printf("[%d] [KUBERNETES_CLIENT_ERROR] [%v]", requestId, err)
+		return err
+	}
+	req := k8sClient.CoreV1().Pods(sess.Pod.Namespace).GetLogs(sess.Pod.Name, &apiv1.PodLogOptions{
+		Container:  sess.Pod.ContainerName,
+		Follow:     true,
+		Previous:   false,
+		Timestamps: false,
+	})
+	r, err := req.Stream(wsConn.Request().Context())
+	if err != nil {
+		log.Printf("[%d] [POD_LOGS_ERROR] [%s] [%v]", requestId, sess.Pod.Name, err)
+		return err
+	}
+	defer r.Close()
+	wsConn.PayloadType = websocket.BinaryFrame
+	go func() {
+		io.Copy(wsConn, r)
+		wsConn.Close()
+		log.Printf("[%d] [POD_LOGS_CLOSED] [%s] [%s]", requestId, sess.Pod.Name, sid)
+	}()
+	io.Copy(wsConn, r)
+	log.Printf("[%d] [POD_LOGS_DISCONNECTED] [%s] [%s]", requestId, sess.Pod.Name, sid)
+	return nil
 }
