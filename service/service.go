@@ -28,8 +28,9 @@ type Environment struct {
 	LogOutputDir         string
 	SaveAllLogs          bool
 	Privileged           bool
-	NameSpace            string
-	InKubernetes         bool
+	Orchestrator         string
+	// k8s specific
+	K8sNameSpace string
 }
 
 const (
@@ -81,23 +82,28 @@ func (m *DefaultManager) Find(caps session.Caps, requestId uint64) (Starter, boo
 	}
 	switch service.Image.(type) {
 	case string:
-		if m.Environment.InKubernetes {
+		switch m.Environment.Orchestrator {
+		case "kubernetes":
 			log.Printf("[%d] [USING_KUBERNETES] [%s]", requestId, browserName)
 			return &Kubernetes{
 				ServiceBase: serviceBase,
 				Environment: *m.Environment,
 				Caps:        caps}, true
-		}
-		if m.Client == nil {
+		case "docker":
+			if m.Client == nil {
+				return nil, false
+			}
+			log.Printf("[%d] [USING_DOCKER] [%s] [%s]", requestId, browserName, version)
+			return &Docker{
+				ServiceBase: serviceBase,
+				Environment: *m.Environment,
+				Caps:        caps,
+				Client:      m.Client,
+				LogConfig:   m.Config.ContainerLogs}, true
+		default:
+			log.Printf("[%d] [INVALID_ORCHESTRATOR] [%s]", requestId, m.Environment.Orchestrator)
 			return nil, false
 		}
-		log.Printf("[%d] [USING_DOCKER] [%s] [%s]", requestId, browserName, version)
-		return &Docker{
-			ServiceBase: serviceBase,
-			Environment: *m.Environment,
-			Caps:        caps,
-			Client:      m.Client,
-			LogConfig:   m.Config.ContainerLogs}, true
 	case []interface{}:
 		log.Printf("[%d] [USING_DRIVER] [%s] [%s]", requestId, browserName, version)
 		return &Driver{ServiceBase: serviceBase, Environment: *m.Environment, Caps: caps}, true

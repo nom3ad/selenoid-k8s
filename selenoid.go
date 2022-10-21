@@ -749,7 +749,7 @@ func streamLogs(wsconn *websocket.Conn) {
 			log.Printf("[%d] [KUBERNETES_CLIENT_ERROR] [%v]", requestId, err)
 			return
 		}
-		req := client.CoreV1().Pods(nameSpace).GetLogs(sess.Pod.Name, &apiv1.PodLogOptions{
+		req := client.CoreV1().Pods(k8sNameSpace).GetLogs(sess.Pod.Name, &apiv1.PodLogOptions{
 			Container:  sess.Pod.ContainerName,
 			Follow:     true,
 			Previous:   false,

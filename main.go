@@ -60,8 +60,10 @@ var (
 	queue                    *protect.Queue
 	manager                  service.Manager
 	cli                      *client.Client
-	nameSpace                string
-	enableKubernetesSupport  bool
+	orchestrator             string
+
+	// k8s specific
+	k8sNameSpace string
 
 	startTime = time.Now()
 
@@ -97,8 +99,8 @@ func init() {
 	flag.StringVar(&logOutputDir, "log-output-dir", "", "Directory to save session log to")
 	flag.BoolVar(&saveAllLogs, "save-all-logs", false, "Whether to save all logs without considering capabilities")
 	flag.DurationVar(&gracefulPeriod, "graceful-period", 300*time.Second, "graceful shutdown period in time.Duration format, e.g. 300s or 500ms")
-	flag.BoolVar(&enableKubernetesSupport, "enable-kubernetes-support", false, "Enable kubernetes support")
-	flag.StringVar(&nameSpace, "namespace", "default", "Kubernetes namespace for browsers")
+	flag.StringVar(&orchestrator, "orchestrator", "docker", "Container orchestrator: docker,kubernetes")
+	flag.StringVar(&k8sNameSpace, "k8s-namespace", "default", "Kubernetes namespace for running browser containers")
 	flag.Parse()
 
 	if version {
@@ -173,14 +175,15 @@ func init() {
 		LogOutputDir:         logOutputDir,
 		SaveAllLogs:          saveAllLogs,
 		Privileged:           !disablePrivileged,
-		NameSpace:            nameSpace,
-		InKubernetes:         enableKubernetesSupport,
+		Orchestrator:         orchestrator,
+
+		K8sNameSpace: k8sNameSpace,
 	}
 
-	if enableKubernetesSupport {
+	log.Printf("[-] [INIT] [Selenoid is running with %s as orchestrator]", orchestrator)
+	if orchestrator != "docker" {
 		disableDocker = true
 		manager = &service.DefaultManager{Environment: &environment, Config: conf}
-		log.Println("[-] [INIT] [Selenoid is running with kubernetes support]")
 		return
 	}
 
