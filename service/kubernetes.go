@@ -54,6 +54,18 @@ var k8sObjYamlSerializer = k8sJson.NewSerializerWithOptions(
 	},
 )
 
+func sanitizeString(s string) string {
+	pref := regexp.MustCompile("[^a-zA-Z0-9]+")
+	s = pref.ReplaceAllString(s, "-")
+	return s
+}
+
+func yamlifyObject(o runtime.Object) string {
+	var buf bytes.Buffer
+	_ = k8sObjYamlSerializer.Encode(o, &buf)
+	return buf.String()
+}
+
 func getK8sClient() (*kubernetes.Clientset, error) {
 	config, err := k8s_config.GetConfigWithContext(os.Getenv("KUBECONFIG_CONTEXT"))
 	if err != nil {
@@ -75,13 +87,13 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 	requestID := k.RequestId
 	image := k.Service.Image.(string)
 	namespace := k.Environment.OrchestratorOptions["k8sNamespace"]
-	containerName := createContainerName(image)
+	containerName := sanitizeString(image)
 
 	v1Pod := &apiv1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: containerName + "-",
 			Namespace:    namespace,
-			Labels:       getLabels(k.Service, k.Caps),
+			Labels:       k.getMetadataLabels(),
 		},
 		Spec: apiv1.PodSpec{
 			Containers: []apiv1.Container{
@@ -178,10 +190,12 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 	return &s, nil
 }
 
-func yamlifyObject(o runtime.Object) string {
-	var buf bytes.Buffer
-	_ = k8sObjYamlSerializer.Encode(o, &buf)
-	return buf.String()
+func (k *Kubernetes) getMetadataLabels() map[string]string {
+	labels := getLabels(k.Service, k.Caps)
+	for k, v := range labels {
+		labels[k] = sanitizeString(v)
+	}
+	return labels
 }
 
 func deletePod(name string, ns string, k8sClient *kubernetes.Clientset, requestID uint64) {
@@ -195,15 +209,6 @@ func deletePod(name string, ns string, k8sClient *kubernetes.Clientset, requestI
 		return
 	}
 	log.Printf("[%d] [POD_DELETED] [%s] [%s]", requestID, name, ns)
-}
-
-func createContainerName(image string) (container string) {
-	pref, err := regexp.Compile("[^a-zA-Z0-9]+")
-	if err != nil {
-		container = "selenoid_browser"
-	}
-	container = pref.ReplaceAllString(image, "-")
-	return container
 }
 
 func getPodIP(name string, ns string, k8sClient *kubernetes.Clientset) string {
@@ -275,7 +280,7 @@ func waitForPodToBeReady(k8sClient *kubernetes.Clientset, namespace, podName str
 				case <-time.After(timeout):
 					w.Stop()
 				case <-time.NewTicker(3 * time.Second).C:
-					log.Printf("[WAITING FOR POD] [Pod=%s] [%s] [%ss]", podName, status.Phase, time.Since(startedAt))
+					log.Printf("[WAITING FOR POD] [Pod=%s] [%s] [%s]", podName, status.Phase, time.Since(startedAt).Truncate(time.Second).String())
 				}
 			}
 		}()

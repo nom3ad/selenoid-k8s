@@ -109,6 +109,7 @@ func init() {
 		showVersion()
 		os.Exit(0)
 	}
+	showVersion()
 
 	var err error
 	hostname, err = os.Hostname()
