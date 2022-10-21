@@ -274,24 +274,19 @@ func getEnvVars(service ServiceBase, caps session.Caps) []apiv1.EnvVar {
 }
 
 func getResources(service ServiceBase) apiv1.ResourceRequirements {
-	getLimits := func(req map[string]string) apiv1.ResourceList {
-		res := apiv1.ResourceList{}
-		if cpu, ok := req["cpu"]; ok {
-			res[apiv1.ResourceCPU] = resource.MustParse(cpu)
+	getRl := func() apiv1.ResourceList {
+		rl := apiv1.ResourceList{}
+		if service.Service.Cpu != "" {
+			rl[apiv1.ResourceCPU] = resource.MustParse(service.Service.Cpu)
 		}
-		if mem, ok := req["memory"]; ok {
-			res[apiv1.ResourceMemory] = resource.MustParse(mem)
+		if service.Service.Mem != "" {
+			rl[apiv1.ResourceMemory] = resource.MustParse(service.Service.Mem)
 		}
-		return res
+		return rl
 	}
 	res := apiv1.ResourceRequirements{}
-	req := service.Service.Requirements
-	if len(req.Limits) != 0 {
-		res.Limits = getLimits(req.Limits)
-	}
-	if len(req.Requests) != 0 {
-		res.Requests = getLimits(req.Requests)
-	}
+	res.Limits = getRl()
+	res.Requests = getRl()
 	return res
 }
 

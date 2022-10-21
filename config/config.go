@@ -63,19 +63,12 @@ type Browser struct {
 	Mem             string            `json:"mem,omitempty"`
 	Cpu             string            `json:"cpu,omitempty"`
 	PublishAllPorts bool              `json:"publishAllPorts,omitempty"`
-	Requirements    Resources         `json:"resources,omitempty"`
 }
 
 // Versions configuration
 type Versions struct {
 	Default  string              `json:"default"`
 	Versions map[string]*Browser `json:"versions"`
-}
-
-// Resources configuration for pod
-type Resources struct {
-	Limits   map[string]string `json:"limits,omitempty"`
-	Requests map[string]string `json:"requests,omitempty"`
 }
 
 // Config current configuration
