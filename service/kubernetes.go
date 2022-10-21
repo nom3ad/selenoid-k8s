@@ -239,25 +239,29 @@ func waitForPodToBeReady(k8sClient *kubernetes.Clientset, pod *apiv1.Pod, ns, na
 	}
 	return nil
 }
+
 func getEnvVars(service ServiceBase, caps session.Caps) []apiv1.EnvVar {
-	envVar := []apiv1.EnvVar{
-		{
-			Name:  "TZ",
-			Value: getTimeZone(service, caps).String(),
-		},
-		{
-			Name:  "SCREEN_RESOLUTION",
-			Value: caps.ScreenResolution,
-		},
-		{
-			Name:  "ENABLE_VNC",
-			Value: fmt.Sprintf("%v", caps.VNC),
-		},
+	env := getEnv(service, caps)
+	var envVars []apiv1.EnvVar
+	for _, s := range env {
+		entry := strings.SplitN(s, "=", 2)
+		envVars = append(envVars, apiv1.EnvVar{Name: entry[0], Value: entry[1]})
+
 	}
-	return envVar
+	return envVars
 }
 
 func getResources(service ServiceBase) apiv1.ResourceRequirements {
+	getLimits := func(req map[string]string) apiv1.ResourceList {
+		res := apiv1.ResourceList{}
+		if cpu, ok := req["cpu"]; ok {
+			res[apiv1.ResourceCPU] = resource.MustParse(cpu)
+		}
+		if mem, ok := req["memory"]; ok {
+			res[apiv1.ResourceMemory] = resource.MustParse(mem)
+		}
+		return res
+	}
 	res := apiv1.ResourceRequirements{}
 	req := service.Service.Requirements
 	if len(req.Limits) != 0 {
@@ -265,17 +269,6 @@ func getResources(service ServiceBase) apiv1.ResourceRequirements {
 	}
 	if len(req.Requests) != 0 {
 		res.Requests = getLimits(req.Requests)
-	}
-	return res
-}
-
-func getLimits(req map[string]string) apiv1.ResourceList {
-	res := apiv1.ResourceList{}
-	if cpu, ok := req["cpu"]; ok {
-		res[apiv1.ResourceCPU] = resource.MustParse(cpu)
-	}
-	if mem, ok := req["memory"]; ok {
-		res[apiv1.ResourceMemory] = resource.MustParse(mem)
 	}
 	return res
 }
