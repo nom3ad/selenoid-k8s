@@ -89,6 +89,40 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 	namespace := k.Environment.OrchestratorOptions["k8sNamespace"]
 	containerName := sanitizeString(image)
 
+	volumes := []apiv1.Volume{
+		{
+			Name: "dshm",
+			VolumeSource: apiv1.VolumeSource{
+				EmptyDir: &apiv1.EmptyDirVolumeSource{
+					Medium:    apiv1.StorageMediumMemory,
+					SizeLimit: getEmptyDirSizeLimit(k.Service),
+				},
+			},
+		},
+	}
+	volumeMounts := []apiv1.VolumeMount{
+		{Name: "dshm", MountPath: "/dev/shm"},
+	}
+	for i, v := range k.Service.Volumes {
+		var vs apiv1.VolumeSource
+		splits := strings.SplitN(v, "=", 2)
+		if len(splits) != 2 {
+			return nil, fmt.Errorf("failed to parse volumes: invalid format")
+		}
+		err = json.Unmarshal([]byte(splits[1]), &vs)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse volumes: %w", err)
+		}
+		volumes = append(volumes, apiv1.Volume{
+			Name:         fmt.Sprintf("vol%d", i),
+			VolumeSource: vs,
+		})
+		volumeMounts = append(volumeMounts, apiv1.VolumeMount{
+			Name:      fmt.Sprintf("vol%d", i),
+			MountPath: splits[0],
+		})
+	}
+
 	v1Pod := &apiv1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: containerName + "-",
@@ -100,32 +134,20 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 				{
 					Name:  containerName,
 					Image: image,
+					Env:   getEnvVars(k.ServiceBase, k.Caps),
+
+					Resources:    getResources(k.ServiceBase),
+					Ports:        getContainerPort(),
+					VolumeMounts: volumeMounts,
 					SecurityContext: &apiv1.SecurityContext{
 						Privileged: &k.Privileged,
 					},
-					Env: getEnvVars(k.ServiceBase, k.Caps),
-
-					Resources: getResources(k.ServiceBase),
-					Ports:     getContainerPort(),
-					VolumeMounts: []apiv1.VolumeMount{
-						{
-							Name:      "dshm",
-							MountPath: "/dev/shm",
-						},
-					},
 				},
 			},
-			Volumes: []apiv1.Volume{
-				{
-					Name: "dshm",
-					VolumeSource: apiv1.VolumeSource{
-						EmptyDir: &apiv1.EmptyDirVolumeSource{
-							Medium:    apiv1.StorageMediumMemory,
-							SizeLimit: getEmptyDirSizeLimit(k.Service),
-						},
-					},
-				},
+			SecurityContext: &apiv1.PodSecurityContext{
+				Sysctls: getSysCtl(k.Service.Sysctl),
 			},
+			Volumes:       volumes,
 			HostAliases:   getHostAliases(k.Service),
 			RestartPolicy: apiv1.RestartPolicyNever,
 		},
@@ -159,7 +181,7 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 	podIP := getPodIP(podName, namespace, k8sClient)
 	hostPort := buildHostPort(podIP, k.Caps)
 
-	u := &url.URL{Scheme: "http", Host: hostPort.Selenium}
+	u := &url.URL{Scheme: "http", Host: hostPort.Selenium, Path: k.Service.Path}
 
 	log.Printf("[%d] [POD_URL] [%s] [%s]", requestID, podName, u.String())
 
@@ -361,6 +383,14 @@ func getContainerPort() []apiv1.ContainerPort {
 	fn(apiv1.ContainerPort{Name: "vnc", ContainerPort: vnc})
 	fn(apiv1.ContainerPort{Name: "devtools", ContainerPort: devtools})
 	return cp
+}
+
+func getSysCtl(m map[string]string) []apiv1.Sysctl {
+	var s []apiv1.Sysctl
+	for k, v := range m {
+		s = append(s, apiv1.Sysctl{Name: k, Value: v})
+	}
+	return s
 }
 
 func spitHostAlias(alias string) apiv1.HostAlias {
