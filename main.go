@@ -102,7 +102,7 @@ func init() {
 	flag.DurationVar(&gracefulPeriod, "graceful-period", 300*time.Second, "graceful shutdown period in time.Duration format, e.g. 300s or 500ms")
 	flag.StringVar(&orchestrator, "orchestrator", "docker", "Container orchestrator: docker,kubernetes")
 	flag.StringVar(&k8sNamespace, "k8s-namespace", "default", "Kubernetes namespace for running browser containers")
-	flag.StringVar(&k8sPodSpecExtraOptions, "k8s-pod-spec-extra-options", "default", "Kubernetes Pod spec additional options as JSON string")
+	flag.StringVar(&k8sPodSpecExtraOptions, "k8s-pod-spec-extra-options", "", "Kubernetes Pod spec additional options as JSON string")
 	flag.Parse()
 
 	if version {
