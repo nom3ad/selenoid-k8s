@@ -171,7 +171,12 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 		v1Pod.ObjectMeta.Name = containerName
 		v1Pod.Spec.Containers[0].Name = containerName
 	}
-	// v1Pod
+
+	if len(k.Caps.DNSServers) > 0 {
+		v1Pod.Spec.DNSConfig = &apiv1.PodDNSConfig{
+			Nameservers: k.Caps.DNSServers,
+		}
+	}
 
 	k8sPodSpecExtraOptions := k.Environment.OrchestratorOptions["k8sPodSpecExtraOptions"]
 	if k8sPodSpecExtraOptions != "" {
