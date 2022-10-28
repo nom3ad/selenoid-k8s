@@ -45,7 +45,7 @@ type Kubernetes struct {
 	session.Caps
 }
 
-func sanitizeString(s string) string {
+func sanitizeStringAsValidDNSLabel(s string) string {
 	pref := regexp.MustCompile("[^a-zA-Z0-9]+")
 	s = pref.ReplaceAllString(s, "-")
 	return s
@@ -98,7 +98,7 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 	requestID := k.RequestId
 	image := k.Service.Image.(string)
 	namespace := k.Environment.OrchestratorOptions["k8sNamespace"]
-	containerName := sanitizeString(image)
+	containerName := sanitizeStringAsValidDNSLabel(image)
 
 	volumes := []apiv1.Volume{
 		{
@@ -143,7 +143,7 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 		Spec: apiv1.PodSpec{
 			Containers: []apiv1.Container{
 				{
-					Name:  containerName,
+					Name:  "browser",
 					Image: image,
 					Env:   getEnvVars(k.ServiceBase, k.Caps),
 
@@ -163,6 +163,14 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 			RestartPolicy: apiv1.RestartPolicyNever,
 		},
 	}
+
+	if k.Caps.ContainerName != "" { // use provided name for both pod and container
+		containerName := sanitizeStringAsValidDNSLabel(k.Caps.ContainerName)
+		v1Pod.ObjectMeta.GenerateName = ""
+		v1Pod.ObjectMeta.Name = containerName
+		v1Pod.Spec.Containers[0].Name = containerName
+	}
+	// v1Pod
 
 	k8sPodSpecExtraOptions := k.Environment.OrchestratorOptions["k8sPodSpecExtraOptions"]
 	if k8sPodSpecExtraOptions != "" {
@@ -226,7 +234,7 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 func (k *Kubernetes) getMetadataLabels() map[string]string {
 	labels := getLabels(k.Service, k.Caps)
 	for k, v := range labels {
-		labels[k] = sanitizeString(v)
+		labels[k] = sanitizeStringAsValidDNSLabel(v)
 	}
 	return labels
 }
