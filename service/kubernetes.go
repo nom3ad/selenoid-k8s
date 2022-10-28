@@ -45,15 +45,6 @@ type Kubernetes struct {
 	session.Caps
 }
 
-var k8sObjYamlSerializer = k8sJson.NewSerializerWithOptions(
-	k8sJson.DefaultMetaFactory, nil, nil,
-	k8sJson.SerializerOptions{
-		Yaml:   true,
-		Pretty: true,
-		Strict: true,
-	},
-)
-
 func sanitizeString(s string) string {
 	pref := regexp.MustCompile("[^a-zA-Z0-9]+")
 	s = pref.ReplaceAllString(s, "-")
@@ -61,8 +52,28 @@ func sanitizeString(s string) string {
 }
 
 func yamlifyObject(o runtime.Object) string {
+	k8sObjYamlSerializer := k8sJson.NewSerializerWithOptions(
+		k8sJson.DefaultMetaFactory, nil, nil,
+		k8sJson.SerializerOptions{
+			Yaml:   true,
+			Pretty: true,
+		},
+	)
 	var buf bytes.Buffer
 	_ = k8sObjYamlSerializer.Encode(o, &buf)
+	return buf.String()
+}
+
+func jsonifyObject(o runtime.Object, pretty bool) string {
+	k8sObjJsonSerializer := k8sJson.NewSerializerWithOptions(
+		k8sJson.DefaultMetaFactory, nil, nil,
+		k8sJson.SerializerOptions{
+			Yaml:   true,
+			Pretty: pretty,
+		},
+	)
+	var buf bytes.Buffer
+	_ = k8sObjJsonSerializer.Encode(o, &buf)
 	return buf.String()
 }
 
@@ -91,7 +102,7 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 
 	volumes := []apiv1.Volume{
 		{
-			Name: "dshm",
+			Name: "shm",
 			VolumeSource: apiv1.VolumeSource{
 				EmptyDir: &apiv1.EmptyDirVolumeSource{
 					Medium:    apiv1.StorageMediumMemory,
@@ -101,7 +112,7 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 		},
 	}
 	volumeMounts := []apiv1.VolumeMount{
-		{Name: "dshm", MountPath: "/dev/shm"},
+		{Name: "shm", MountPath: "/dev/shm"},
 	}
 	for i, v := range k.Service.Volumes {
 		var vs apiv1.VolumeSource
@@ -161,7 +172,7 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 	}
 
 	// podYaml, _ := yaml.Marshal(v1Pod)
-	log.Printf("[%d] [CREATING_POD] [%s] [%s] Pod=%s", requestID, image, namespace, yamlifyObject(v1Pod))
+	log.Printf("[%d] [CREATING_POD] [%s] [%s] Pod=%s", requestID, image, namespace, jsonifyObject(v1Pod, false))
 
 	podStartTime := time.Now()
 	podObj, err := k8sClient.CoreV1().Pods(namespace).Create(context.Background(), v1Pod, metav1.CreateOptions{})
@@ -287,17 +298,17 @@ func waitForPodToBeReady(k8sClient *kubernetes.Clientset, namespace, podName str
 		func() {
 			for {
 				select {
-				case events, ok := <-w.ResultChan():
+				case ev, ok := <-w.ResultChan():
 					if !ok {
 						return
 					}
-					if podObj, ok := events.Object.(*apiv1.Pod); ok {
+					if podObj, ok := ev.Object.(*apiv1.Pod); ok {
 						status = podObj.Status
 						if podObj.Status.Phase != apiv1.PodPending {
 							w.Stop()
 						}
 					} else {
-						log.Printf("[UNHANDLED EVENT] [Pod=%s] [%s] Obj=%s", podName, events.Type, yamlifyObject(events.Object))
+						log.Printf("[UNHANDLED EVENT] [Pod=%s] [%s] Obj=\n%s", podName, ev.Type, yamlifyObject(ev.Object))
 					}
 				case <-time.After(timeout):
 					w.Stop()
