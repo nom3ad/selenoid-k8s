@@ -159,6 +159,7 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 				Sysctls: getSysCtl(k.Service.Sysctl),
 			},
 			Volumes:       volumes,
+			Hostname:      k.Caps.ContainerHostname,
 			HostAliases:   getHostAliases(k.Service),
 			RestartPolicy: apiv1.RestartPolicyNever,
 		},
