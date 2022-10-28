@@ -172,6 +172,12 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 		v1Pod.Spec.Containers[0].Name = containerName
 	}
 
+	if k.Environment.Network == "host" {
+		v1Pod.Spec.HostNetwork = true
+	} else if k.Environment.Network != "" {
+		log.Printf("[%d] [POD_CONFIG] invalid network: %s", requestID, k.Environment.Network)
+	}
+
 	if len(k.Caps.DNSServers) > 0 {
 		v1Pod.Spec.DNSConfig = &apiv1.PodDNSConfig{
 			Nameservers: k.Caps.DNSServers,
