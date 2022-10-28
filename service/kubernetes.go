@@ -68,7 +68,6 @@ func jsonifyObject(o runtime.Object, pretty bool) string {
 	k8sObjJsonSerializer := k8sJson.NewSerializerWithOptions(
 		k8sJson.DefaultMetaFactory, nil, nil,
 		k8sJson.SerializerOptions{
-			Yaml:   true,
 			Pretty: pretty,
 		},
 	)
@@ -143,7 +142,7 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 		Spec: apiv1.PodSpec{
 			Containers: []apiv1.Container{
 				{
-					Name:  "browser",
+					Name:  containerName,
 					Image: image,
 					Env:   getEnvVars(k.ServiceBase, k.Caps),
 
@@ -166,7 +165,7 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 	}
 
 	if k.Caps.ContainerName != "" { // use provided name for both pod and container
-		containerName := sanitizeStringAsValidDNSLabel(k.Caps.ContainerName)
+		containerName = sanitizeStringAsValidDNSLabel(k.Caps.ContainerName)
 		v1Pod.ObjectMeta.GenerateName = ""
 		v1Pod.ObjectMeta.Name = containerName
 		v1Pod.Spec.Containers[0].Name = containerName
@@ -433,7 +432,7 @@ func spitHostAlias(alias string) apiv1.HostAlias {
 }
 
 func StreamK8sPodLogs(requestId uint64, sess *session.Session, wsConn *websocket.Conn, sid string) error {
-	log.Printf("[%d] [POD_LOGS] [%s]", requestId, sess.Pod.Name)
+	log.Printf("[%d] [POD_LOGS] [%s/%s]", requestId, sess.Pod.Name, sess.Pod.ContainerName)
 	k8sClient, err := getK8sClient()
 	if err != nil {
 		log.Printf("[%d] [KUBERNETES_CLIENT_ERROR] [%v]", requestId, err)
@@ -447,17 +446,12 @@ func StreamK8sPodLogs(requestId uint64, sess *session.Session, wsConn *websocket
 	})
 	r, err := req.Stream(wsConn.Request().Context())
 	if err != nil {
-		log.Printf("[%d] [POD_LOGS_ERROR] [%s] [%v]", requestId, sess.Pod.Name, err)
+		log.Printf("[%d] [POD_LOGS_STREAM_ERROR] [%s/%s] [err=%v]", requestId, sess.Pod.Name, sess.Pod.ContainerName, err)
 		return err
 	}
 	defer r.Close()
 	wsConn.PayloadType = websocket.BinaryFrame
-	go func() {
-		io.Copy(wsConn, r)
-		wsConn.Close()
-		log.Printf("[%d] [POD_LOGS_CLOSED] [%s] [%s]", requestId, sess.Pod.Name, sid)
-	}()
-	io.Copy(wsConn, r)
-	log.Printf("[%d] [POD_LOGS_DISCONNECTED] [%s] [%s]", requestId, sess.Pod.Name, sid)
+	_, err = io.Copy(wsConn, r)
+	log.Printf("[%d] [POD_LOGS_STREAM_DISCONNECTED] [%s/%s] [%s] [err=%s]", requestId, sess.Pod.Name, sess.Pod.ContainerName, sid, err)
 	return nil
 }
