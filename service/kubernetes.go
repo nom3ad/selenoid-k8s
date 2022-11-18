@@ -146,7 +146,7 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 					Image: image,
 					Env:   getEnvVars(k.ServiceBase, k.Caps),
 
-					Resources:    getResources(k.ServiceBase),
+					Resources:    k.getResources(),
 					Ports:        getContainerPort(),
 					VolumeMounts: volumeMounts,
 					SecurityContext: &apiv1.SecurityContext{
@@ -354,14 +354,18 @@ func getEnvVars(service ServiceBase, caps session.Caps) []apiv1.EnvVar {
 	return envVars
 }
 
-func getResources(service ServiceBase) apiv1.ResourceRequirements {
+func (k *Kubernetes) getResources() apiv1.ResourceRequirements {
 	getRl := func() apiv1.ResourceList {
 		rl := apiv1.ResourceList{}
-		if service.Service.Cpu != "" {
-			rl[apiv1.ResourceCPU] = resource.MustParse(service.Service.Cpu)
+		if k.Service.Cpu != "" {
+			rl[apiv1.ResourceCPU] = resource.MustParse(k.Service.Cpu)
+		} else if k.Environment.CPU != 0 {
+			rl[apiv1.ResourceCPU] = *resource.NewQuantity(k.Environment.CPU, resource.DecimalSI)
 		}
-		if service.Service.Mem != "" {
-			rl[apiv1.ResourceMemory] = resource.MustParse(service.Service.Mem)
+		if k.Service.Mem != "" {
+			rl[apiv1.ResourceMemory] = resource.MustParse(k.Service.Mem)
+		} else if k.Environment.Memory != 0 {
+			rl[apiv1.ResourceMemory] = *resource.NewQuantity(k.Environment.Memory*1e6, resource.BinarySI)
 		}
 		return rl
 	}
