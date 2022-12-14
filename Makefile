@@ -32,3 +32,8 @@ image: build
 .PHONY: run-k8s
 run-k8s:
 	go run .  -orchestrator kubernetes $$args
+
+
+.PHONY: run-demo
+run-demo:
+	python demo/main.py

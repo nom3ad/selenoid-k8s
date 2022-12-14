@@ -79,18 +79,19 @@ type Pod struct {
 
 // Session - holds session info
 type Session struct {
-	Quota     string
-	Caps      Caps
-	URL       *url.URL
-	Container *Container
-	Pod       *Pod
-	HostPort  HostPort
-	Origin    string
-	Cancel    func()
-	Timeout   time.Duration
-	TimeoutCh chan struct{}
-	Started   time.Time
-	Lock      sync.Mutex
+	Quota        string
+	Caps         Caps
+	URL          *url.URL
+	Orchestrator string
+	Pod          *Pod       // for other orchestrator
+	Container    *Container // Original docker implementation
+	HostPort     HostPort
+	Origin       string
+	Cancel       func()
+	Timeout      time.Duration
+	TimeoutCh    chan struct{}
+	Started      time.Time
+	Lock         sync.Mutex
 }
 
 // HostPort - hold host-port values for all forwarded ports

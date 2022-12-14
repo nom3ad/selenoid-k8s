@@ -295,14 +295,15 @@ func create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sess := &session.Session{
-		Quota:     user,
-		Caps:      caps,
-		URL:       u,
-		Container: startedService.Container,
-		Pod:       startedService.Pod,
-		HostPort:  startedService.HostPort,
-		Origin:    startedService.Origin,
-		Timeout:   sessionTimeout,
+		Quota:        user,
+		Caps:         caps,
+		URL:          u,
+		Orchestrator: startedService.Orchestrator,
+		Pod:          startedService.Pod,
+		Container:    startedService.Container,
+		HostPort:     startedService.HostPort,
+		Origin:       startedService.Origin,
+		Timeout:      sessionTimeout,
 		TimeoutCh: onTimeout(sessionTimeout, func() {
 			request{r}.session(s.ID).Delete(requestId)
 		}),
@@ -718,7 +719,11 @@ func streamLogs(wsconn *websocket.Conn) {
 	requestId := serial()
 	sid, _ := splitRequestPath(wsconn.Request().URL.Path)
 	sess, ok := sessions.Get(sid)
-	if ok && sess.Container != nil {
+	if !ok {
+		log.Printf("[%d] [SESSION_NOT_FOUND] [%s]", requestId, sid)
+		return
+	}
+	if sess.Container != nil {
 		log.Printf("[%d] [CONTAINER_LOGS] [%s]", requestId, sess.Container.ID)
 		r, err := cli.ContainerLogs(wsconn.Request().Context(), sess.Container.ID, types.ContainerLogsOptions{
 			ShowStdout: true,
@@ -733,10 +738,10 @@ func streamLogs(wsconn *websocket.Conn) {
 		wsconn.PayloadType = websocket.BinaryFrame
 		stdcopy.StdCopy(wsconn, wsconn, r)
 		log.Printf("[%d] [CONTAINER_LOGS_DISCONNECTED] [%s]", requestId, sid)
-	} else if ok && sess.Pod != nil {
-		service.StreamK8sPodLogs(requestId, sess, wsconn, sid)
+	} else if sess.Orchestrator == "kubernetes" {
+		_ = service.StreamK8sPodLogs(requestId, sess, wsconn, sid)
 	} else {
-		log.Printf("[%d] [SESSION_NOT_FOUND] [%s]", requestId, sid)
+		log.Printf("[%d] [%s] [INVALID_ORCHESTRATOR] [%s] ", requestId, sid, sess.Orchestrator)
 	}
 }
 

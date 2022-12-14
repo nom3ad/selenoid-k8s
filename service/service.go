@@ -29,8 +29,6 @@ type Environment struct {
 	SaveAllLogs          bool
 	Privileged           bool
 	Orchestrator         string
-
-	OrchestratorOptions map[string]string
 }
 
 const (
@@ -45,12 +43,13 @@ type ServiceBase struct {
 
 // StartedService - all started service properties
 type StartedService struct {
-	Url       *url.URL
-	Container *session.Container
-	Pod       *session.Pod
-	HostPort  session.HostPort
-	Origin    string
-	Cancel    func()
+	Url          *url.URL
+	Orchestrator string
+	Pod          *session.Pod
+	Container    *session.Container
+	HostPort     session.HostPort
+	Origin       string
+	Cancel       func()
 }
 
 // Starter - interface to create session with cancellation ability
