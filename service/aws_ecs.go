@@ -18,7 +18,7 @@ import (
 	"golang.org/x/net/websocket"
 )
 
-var (
+var flags = struct {
 	awsECSRegion                   string
 	awsECSClusterName              string
 	awsECSExecutionRoleArn         string
@@ -27,31 +27,27 @@ var (
 	awsECSecurityGroupIDs          string
 	awsECSNetworkMode              string
 	awsECSAssignPublicIP           bool
-	awsECSCapacityProviderStrategy string
+	awsECSCapacityProvider         string
 	awsECSLogConfiguration         string
 	awsECSTaskPlacementConstraints string
 	awsECSTaskTags                 string
-)
-
-const (
-	awsECSDefaultCapacityProviderStrategy = "[{ \"capacityProvider\": \"FARGATE_SPOT\", \"weight\": 100 }]"
-)
+}{}
 
 var ecs_session *aws_session.Session
 
 func InitAWSElasticContainerServiceFlags() {
-	flag.StringVar(&awsECSRegion, "aws-ecs-region", "", "AWS ECS region")
-	flag.StringVar(&awsECSClusterName, "aws-ecs-cluster-name", "default", "AWS ECS Cluster name")
-	flag.StringVar(&awsECSExecutionRoleArn, "aws-ecs-execution-role-arn", "", "AWS ECS Execution role ARN")
-	flag.StringVar(&awsECSTaskRoleArn, "aws-ecs-task-role-arn", "", "AWS ECS Task role ARN")
-	flag.StringVar(&awsECSSubnetIDs, "aws-ecs-subnets", "", "Comma separated list of AWS VPC subnet IDs")
-	flag.StringVar(&awsECSecurityGroupIDs, "aws-ecs-security-group-id", "", "Comma separated list of AWS ECS Security group IDs")
-	flag.StringVar(&awsECSNetworkMode, "aws-ecs-network-mode", "awsvpc", "AWS ECS Network mode")
-	flag.BoolVar(&awsECSAssignPublicIP, "aws-ecs-assign-public-ip", false, "Whether to assign public IP to AWS ECS Task ENIs")
-	flag.StringVar(&awsECSCapacityProviderStrategy, "aws-ecs-capacity-provider-strategy", awsECSDefaultCapacityProviderStrategy, "AWS ECS []CapacityProviderStrategyItem as JSON list string")
-	flag.StringVar(&awsECSLogConfiguration, "aws-ecs-log-configuration", "", "AWS ECS ContainerDefinition.logConfiguration as JSON object string")
-	flag.StringVar(&awsECSTaskPlacementConstraints, "aws-ecs-task-placement-constraints", "", "AWS ECS []PlacementConstraint as JSON list string")
-	flag.StringVar(&awsECSTaskTags, "aws-ecs-task-tags", "", "AWS ECS Task tags as key1=value=1,key2=value2 format")
+	flag.StringVar(&flags.awsECSRegion, "aws-ecs-region", "", "AWS ECS region")
+	flag.StringVar(&flags.awsECSClusterName, "aws-ecs-cluster-name", "default", "AWS ECS Cluster name")
+	flag.StringVar(&flags.awsECSExecutionRoleArn, "aws-ecs-execution-role-arn", "", "AWS ECS Execution role ARN")
+	flag.StringVar(&flags.awsECSTaskRoleArn, "aws-ecs-task-role-arn", "", "AWS ECS Task role ARN")
+	flag.StringVar(&flags.awsECSSubnetIDs, "aws-ecs-subnets", "", "Comma separated list of AWS VPC subnet IDs")
+	flag.StringVar(&flags.awsECSecurityGroupIDs, "aws-ecs-security-group-id", "", "Comma separated list of AWS ECS Security group IDs")
+	flag.StringVar(&flags.awsECSNetworkMode, "aws-ecs-network-mode", "awsvpc", "AWS ECS Network mode")
+	flag.BoolVar(&flags.awsECSAssignPublicIP, "aws-ecs-assign-public-ip", false, "Whether to assign public IP to AWS ECS Task ENIs")
+	flag.StringVar(&flags.awsECSCapacityProvider, "aws-ecs-capacity-provider", "FARGATE_SPOT", "AWS ECS capacity provider. FARGATE,FARGATE_SPOT or existing Auto Scaling group capacity provider")
+	flag.StringVar(&flags.awsECSLogConfiguration, "aws-ecs-log-configuration", "", "AWS ECS ContainerDefinition.logConfiguration as JSON object string")
+	flag.StringVar(&flags.awsECSTaskPlacementConstraints, "aws-ecs-task-placement-constraints", "", "AWS ECS []PlacementConstraint as JSON list string")
+	flag.StringVar(&flags.awsECSTaskTags, "aws-ecs-task-tags", "", "AWS ECS Task tags as key1=value=1,key2=value2 format")
 }
 
 // AWSElasticContainerService
@@ -65,7 +61,7 @@ func getECSClient() (*ecs.ECS, error) {
 	var err error
 	if ecs_session == nil {
 		ecs_session, err = aws_session.NewSession(&aws.Config{
-			// Region: ,
+			Region: nonEmptyStringPtr(flags.awsECSRegion),
 		})
 		if err != nil {
 			return nil, err
@@ -129,7 +125,17 @@ func (s *AWSElasticContainerService) StartWithCancel() (*StartedService, error) 
 func (s *AWSElasticContainerService) registerTaskDefinition(ecsClient *ecs.ECS, image string, containerName string, requestID uint64) (*ecs.TaskDefinition, error) {
 	image = fullyQualifiedImageName(image)
 	requiresCompatibilities := []string{"EC2", "FARGATE"}
-	family := s.deriveTaskDefinitionFamilyName(image, containerName, requiresCompatibilities)
+	dnServers := s.Caps.DNSServers
+	networkMode := flags.awsECSNetworkMode
+	if s.Environment.Network != "" {
+		networkMode = s.Environment.Network
+	}
+	var logGroupConfiguration ecs.LogConfiguration
+	if err := jsonUnmarshalOnTrimmedValue(flags.awsECSLogConfiguration, &logGroupConfiguration); err != nil {
+		return nil, fmt.Errorf("invalid LogConfiguration: %q: %w", flags.awsECSLogConfiguration, err)
+	}
+
+	family := s.deriveTaskDefinitionFamilyName(image, containerName, requiresCompatibilities, dnServers, logGroupConfiguration)
 	log.Printf("[%d] [CHECK_IF_TASK_DEFINITION_EXISTS] image=%s family=%s", requestID, image, family)
 	describeOutput, err := ecsClient.DescribeTaskDefinition(&ecs.DescribeTaskDefinitionInput{
 		TaskDefinition: &family,
@@ -144,16 +150,20 @@ func (s *AWSElasticContainerService) registerTaskDefinition(ecsClient *ecs.ECS, 
 	containerDef := ecs.ContainerDefinition{
 		Name:         &containerName,
 		Image:        &image,
-		Memory:       ptrToInt64(128), // Dummy, will override in task run
+		Memory:       aws.Int64(128), // Dummy, will override in task run
 		PortMappings: s.getPortMapping(),
+		DnsServers:   aws.StringSlice(dnServers),
+	}
+	if aws.StringValue(logGroupConfiguration.LogDriver) != "" {
+		containerDef.LogConfiguration = &logGroupConfiguration
 	}
 	taskDefRegisterInput := ecs.RegisterTaskDefinitionInput{
-		RequiresCompatibilities: stringSliceToPtrSlice(requiresCompatibilities),
+		RequiresCompatibilities: aws.StringSlice(requiresCompatibilities),
 		Family:                  &family,
 		ContainerDefinitions:    []*ecs.ContainerDefinition{&containerDef},
-		NetworkMode:             ptrTo("awsvpc"), // FARGATE Dummy , will override in task run
-		Cpu:                     ptrTo("256"),    // FARGATE Dummy, will override in task run
-		Memory:                  ptrTo("512"),    // FARGATE Dummy, will override in task run
+		NetworkMode:             aws.String(networkMode), // For FARGATE, awsvpc is only supported
+		Cpu:                     aws.String("256"),       // FARGATE Dummy, will override in task run
+		Memory:                  aws.String("512"),       // FARGATE Dummy, will override in task run
 	}
 	log.Printf("[%d] [REGISTERING_TASK_DEFINITION] family=%s TaskDef=%s", requestID, family, jsonMarshal(taskDefRegisterInput))
 	taskDefRegisterOutput, err := ecsClient.RegisterTaskDefinition(&taskDefRegisterInput)
@@ -169,7 +179,7 @@ func (s *AWSElasticContainerService) deriveTaskDefinitionFamilyName(image string
 	hashInput := image
 	for _, v := range values {
 		if v != nil {
-			hashInput += fmt.Sprint(v)
+			hashInput += jsonMarshal(v)
 		}
 	}
 	hash := md5.Sum([]byte(hashInput))
@@ -179,37 +189,42 @@ func (s *AWSElasticContainerService) deriveTaskDefinitionFamilyName(image string
 }
 
 func (s *AWSElasticContainerService) runTask(ecsClient *ecs.ECS, taskDefArn string, containerName string, requestID uint64) (*ecs.Task, error) {
-	clusterName := awsECSClusterName
-	executionRoleArn := awsECSExecutionRoleArn
-	taskRoleArn := awsECSTaskRoleArn
+	clusterName := flags.awsECSClusterName
+	executionRoleArn := flags.awsECSExecutionRoleArn
+	taskRoleArn := flags.awsECSTaskRoleArn
 	var capacityProviderStrategy []*ecs.CapacityProviderStrategyItem
-	if err := jsonUnmarshalOnTrimmedValue(awsECSCapacityProviderStrategy, &capacityProviderStrategy); err != nil {
-		return nil, fmt.Errorf("invalid awsECSCapacityProviderStrategy: %q: %w", awsECSCapacityProviderStrategy, err)
+	if flags.awsECSCapacityProvider != "" {
+		capacityProviderStrategy = []*ecs.CapacityProviderStrategyItem{
+			{
+				Weight:           aws.Int64(100),
+				CapacityProvider: &flags.awsECSCapacityProvider,
+			},
+		}
 	}
 	var placementConstrains []*ecs.PlacementConstraint
-	if err := jsonUnmarshalOnTrimmedValue(awsECSTaskPlacementConstraints, &placementConstrains); err != nil {
-		return nil, fmt.Errorf("invalid awsECSTaskPlacementConstraints: %q: %w", awsECSTaskPlacementConstraints, err)
+	if err := jsonUnmarshalOnTrimmedValue(flags.awsECSTaskPlacementConstraints, &placementConstrains); err != nil {
+		return nil, fmt.Errorf("invalid TaskPlacementConstraints: %q: %w", flags.awsECSTaskPlacementConstraints, err)
 	}
 	var networkConfiguration *ecs.NetworkConfiguration
-	if awsECSNetworkMode == "awsvpc" {
+	if flags.awsECSNetworkMode == "awsvpc" {
 		assignPublicIP := "DISABLED"
-		if awsECSAssignPublicIP {
+		if flags.awsECSAssignPublicIP {
 			assignPublicIP = "ENABLED"
 		}
-		securityGroups := parseCommaSeparatedString(awsECSecurityGroupIDs)
-		subnets := parseCommaSeparatedString(awsECSSubnetIDs)
+		securityGroups := parseCommaSeparatedString(flags.awsECSecurityGroupIDs)
+		subnets := parseCommaSeparatedString(flags.awsECSSubnetIDs)
 		if len(subnets) == 0 {
 			return nil, fmt.Errorf("no subnets found")
 		}
 		networkConfiguration = &ecs.NetworkConfiguration{
 			AwsvpcConfiguration: &ecs.AwsVpcConfiguration{
-				Subnets:        stringSliceToPtrSlice(subnets), // required
+				Subnets:        aws.StringSlice(subnets), // required
 				AssignPublicIp: &assignPublicIP,
-				SecurityGroups: stringSliceToPtrSlice(securityGroups),
+				SecurityGroups: aws.StringSlice(securityGroups),
 			},
 		}
 	}
-	tags := s.parseTags(awsECSTaskTags)
+	tags := s.getTags()
 
 	var cpu, memory string
 	if s.Service.Cpu != "" {
@@ -231,8 +246,8 @@ func (s *AWSElasticContainerService) runTask(ecsClient *ecs.ECS, taskDefArn stri
 
 	taskRunInput := ecs.RunTaskInput{
 		TaskDefinition:           &taskDefArn,
-		Count:                    ptrToInt64(1),
-		Cluster:                  ptrToNonEmptyString(clusterName),
+		Count:                    aws.Int64(1),
+		Cluster:                  nonEmptyStringPtr(clusterName),
 		StartedBy:                &startedBy,
 		Tags:                     tags,
 		CapacityProviderStrategy: capacityProviderStrategy,
@@ -241,23 +256,31 @@ func (s *AWSElasticContainerService) runTask(ecsClient *ecs.ECS, taskDefArn stri
 		EnableExecuteCommand:     &enableExecuteCommand,
 		PlacementConstraints:     placementConstrains,
 		Overrides: &ecs.TaskOverride{
-			Cpu:              ptrToNonEmptyString(cpu),
-			Memory:           ptrToNonEmptyString(memory),
-			ExecutionRoleArn: ptrToNonEmptyString(executionRoleArn),
-			TaskRoleArn:      ptrToNonEmptyString(taskRoleArn),
-			// EphemeralStorage: ,
+			Cpu:              nonEmptyStringPtr(cpu),
+			Memory:           nonEmptyStringPtr(memory),
+			ExecutionRoleArn: nonEmptyStringPtr(executionRoleArn),
+			TaskRoleArn:      nonEmptyStringPtr(taskRoleArn),
 			ContainerOverrides: []*ecs.ContainerOverride{
 				{
 					Name:        &containerName,
 					Command:     command,
 					Environment: environment,
+					// EnvironmentFiles: ,
+					// Cpu: ,
+					// Memory: ,
+					// MemoryReservation:
+					// ResourceRequirements: , ,
 				},
 			},
+			// EphemeralStorage: ,
+			// InferenceAcceleratorOverrides: ,
 		},
 		// PlatformVersion: Will use LATEST for Fargate,
 		// Group: The default value is the family name of the task definition,
 		// LaunchType: contradict CapacityProviderStrategy,
-		// PlatformVersion: LATEST,
+		// PlacementStrategy: ,
+		// PropagateTags: ,
+		// ReferenceId: ,
 	}
 
 	log.Printf("[%d] [STARTING_TASK] [%s] [%s] Task=%s", requestID, taskDefArn, clusterName, jsonMarshal(taskRunInput))
@@ -276,8 +299,8 @@ func (s *AWSElasticContainerService) runTask(ecsClient *ecs.ECS, taskDefArn stri
 			return nil, fmt.Errorf("timeout while waiting for task - %s", *task.TaskArn)
 		}
 		ip, agentStatus := s.getContainerInfo(*task)
-		log.Printf("[%d] [WAITING_FOR_TASK] [%s] [lastStatus:%s] [connectivity: %s] [IP: %s] [Agent: %s]",
-			requestID, *task.TaskArn, strFromPtr(task.LastStatus), strFromPtr(task.Connectivity), ip, agentStatus)
+		log.Printf("[%d] [WAITING_FOR_TASK] [%s] [lastStatus:%s] [connectivity: %s] [IP: %s] [Agents: %s]",
+			requestID, *task.TaskArn, aws.StringValue(task.LastStatus), aws.StringValue(task.Connectivity), ip, agentStatus)
 		describeTaskOutput, err := ecsClient.DescribeTasks(&ecs.DescribeTasksInput{
 			Cluster: &clusterName,
 			Tasks:   []*string{task.TaskArn},
@@ -286,15 +309,15 @@ func (s *AWSElasticContainerService) runTask(ecsClient *ecs.ECS, taskDefArn stri
 			return nil, err
 		}
 		if len(describeTaskOutput.Failures) > 0 {
-			return nil, fmt.Errorf("unexpected failure: arn=%s reason=%s details=%s", strFromPtr(runTaskOutput.Failures[0].Arn), strFromPtr(runTaskOutput.Failures[0].Reason), strFromPtr(runTaskOutput.Failures[0].Reason))
+			return nil, fmt.Errorf("unexpected failure: arn=%s reason=%s details=%s", aws.StringValue(runTaskOutput.Failures[0].Arn), aws.StringValue(runTaskOutput.Failures[0].Reason), aws.StringValue(runTaskOutput.Failures[0].Reason))
 		}
 		task = describeTaskOutput.Tasks[0]
-		if strFromPtr(task.LastStatus) == "RUNNING" {
+		if aws.StringValue(task.LastStatus) == "RUNNING" {
 			log.Printf("[%d] [TASK_RUNNING] [%s]", requestID, *task.TaskArn)
 			return task, nil
 		}
-		if strFromPtr(task.LastStatus) == "STOPPED" {
-			return nil, fmt.Errorf("task was stopped unexpectedly. %s (code=%s)", strFromPtr(task.StoppedReason), strFromPtr(task.StopCode))
+		if aws.StringValue(task.LastStatus) == "STOPPED" {
+			return nil, fmt.Errorf("task was stopped unexpectedly. %s (code=%s)", aws.StringValue(task.StoppedReason), aws.StringValue(task.StopCode))
 		}
 		time.Sleep(checkInterval)
 	}
@@ -307,31 +330,35 @@ func (s *AWSElasticContainerService) getContainerInfo(task ecs.Task) (ipAddress 
 	mainContainer := task.Containers[0]
 	// mainContainer.ManagedAgents
 	for _, ni := range mainContainer.NetworkInterfaces {
-		if strFromPtr(ni.PrivateIpv4Address) != "" {
-			ipAddress = strFromPtr(ni.PrivateIpv4Address)
+		if aws.StringValue(ni.PrivateIpv4Address) != "" {
+			ipAddress = aws.StringValue(ni.PrivateIpv4Address)
 		}
 	}
 	for _, ma := range mainContainer.ManagedAgents {
-		agentStatus += fmt.Sprintf("<%s:%s (%s)>", strFromPtr(ma.Name), strFromPtr(ma.LastStatus), strFromPtr(ma.Reason))
+		agentStatus += fmt.Sprintf("<%s:%s (%s)>", aws.StringValue(ma.Name), aws.StringValue(ma.LastStatus), aws.StringValue(ma.Reason))
 	}
 	return
 }
 
-func (s *AWSElasticContainerService) parseTags(value string) []*ecs.Tag {
+func (s *AWSElasticContainerService) getTags() []*ecs.Tag {
 	var tags []*ecs.Tag
-	for k, v := range parseKVString(value) {
-		tags = append(tags, &ecs.Tag{Key: ptrTo(k), Value: ptrTo(v)})
+	for k, v := range parseKVString(flags.awsECSTaskTags) {
+		tags = append(tags, &ecs.Tag{Key: aws.String(k), Value: aws.String(v)})
+	}
+	labels := getLabels(s.Service, s.Caps)
+	for k, v := range labels {
+		tags = append(tags, &ecs.Tag{Key: aws.String(k), Value: aws.String(v)})
 	}
 	return tags
 }
 
 func (s *AWSElasticContainerService) getPortMapping() []*ecs.PortMapping {
 	var ports []*ecs.PortMapping
-	ports = append(ports, &ecs.PortMapping{ContainerPort: ptrToInt64(Ports.Selenium), HostPort: ptrToInt64(Ports.Selenium)})
-	ports = append(ports, &ecs.PortMapping{ContainerPort: ptrToInt64(Ports.Fileserver), HostPort: ptrToInt64(Ports.Fileserver)})
-	ports = append(ports, &ecs.PortMapping{ContainerPort: ptrToInt64(Ports.Clipboard), HostPort: ptrToInt64(Ports.Clipboard)})
-	ports = append(ports, &ecs.PortMapping{ContainerPort: ptrToInt64(Ports.VNC), HostPort: ptrToInt64(Ports.VNC)})
-	ports = append(ports, &ecs.PortMapping{ContainerPort: ptrToInt64(Ports.Devtools), HostPort: ptrToInt64(Ports.Devtools)})
+	ports = append(ports, &ecs.PortMapping{ContainerPort: int64Ptr(Ports.Selenium), HostPort: int64Ptr(Ports.Selenium)})
+	ports = append(ports, &ecs.PortMapping{ContainerPort: int64Ptr(Ports.Fileserver), HostPort: int64Ptr(Ports.Fileserver)})
+	ports = append(ports, &ecs.PortMapping{ContainerPort: int64Ptr(Ports.Clipboard), HostPort: int64Ptr(Ports.Clipboard)})
+	ports = append(ports, &ecs.PortMapping{ContainerPort: int64Ptr(Ports.VNC), HostPort: int64Ptr(Ports.VNC)})
+	ports = append(ports, &ecs.PortMapping{ContainerPort: int64Ptr(Ports.Devtools), HostPort: int64Ptr(Ports.Devtools)})
 	return ports
 }
 
@@ -340,7 +367,7 @@ func (s *AWSElasticContainerService) getEnvVars(service ServiceBase, caps sessio
 	var envVars []*ecs.KeyValuePair
 	for _, s := range env {
 		entry := strings.SplitN(s, "=", 2)
-		envVars = append(envVars, &ecs.KeyValuePair{Name: ptrTo(entry[0]), Value: ptrTo(entry[1])})
+		envVars = append(envVars, &ecs.KeyValuePair{Name: aws.String(entry[0]), Value: aws.String(entry[1])})
 
 	}
 	return envVars
@@ -353,13 +380,13 @@ func (s *AWSElasticContainerService) stopTask(ecsClient *ecs.ECS, task string, c
 		Reason:  &reason,
 		Task:    &task,
 	}
-	log.Printf("[%d] [STOPPING_TASK] [%s]/[%s]", requestID, cluster, task)
+	log.Printf("[%d] [STOPPING_TASK] [%s] [%s]", requestID, cluster, task)
 	_, err := ecsClient.StopTask(input)
 	if err != nil {
-		log.Printf("[%d] [TASK_STOP_ERROR] [%s]/[%s] [%s]", requestID, cluster, task, err)
+		log.Printf("[%d] [TASK_STOP_ERROR] [%s] [%s] [%s]", requestID, cluster, task, err)
 		return
 	}
-	log.Printf("[%d] [TASK_STOPPED] [%s]/[%s]", requestID, cluster, task)
+	log.Printf("[%d] [TASK_STOPPED] [%s] [%s]", requestID, cluster, task)
 }
 
 func StreamAWSECSContainerLogs(requestId uint64, sess *session.Session, wsConn *websocket.Conn, sid string) (err error) {

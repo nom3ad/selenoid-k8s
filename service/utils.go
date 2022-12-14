@@ -20,15 +20,6 @@ func parseCommaSeparatedString(value string) []string {
 	return list
 }
 
-func stringSliceToPtrSlice(slice []string) []*string {
-	var out []*string
-	for _, s := range slice {
-		v := s
-		out = append(out, &v)
-	}
-	return out
-}
-
 func jsonUnmarshalOnTrimmedValue(s string, v any) error {
 	s = strings.TrimSpace(s)
 	if s != "" {
@@ -55,29 +46,21 @@ func fullyQualifiedImageName(image string) string {
 	return image
 }
 
-func ptrTo[T any](v T) *T {
-	return &v
-}
+// func ptrTo[T any](v T) *T {
+// 	return &v
+// }
 
-func ptrToInt64[T int | int32 | int8 | int16 | int64 | float32 | float64](v T) *int64 {
+func int64Ptr[T int | int32 | int8 | int16 | int64 | float32 | float64](v T) *int64 {
 	i := int64(v)
 	return &i
 }
 
-func ptrToNonEmptyString(value string) *string {
+func nonEmptyStringPtr(value string) *string {
 	v := strings.TrimSpace(value)
 	if v == "" {
 		return nil
 	}
 	return &v
-}
-
-func strFromPtr(p *string) string {
-	var s string
-	if p != nil {
-		s = *p
-	}
-	return s
 }
 
 func parseKVString(value string) map[string]string {
@@ -87,8 +70,11 @@ func parseKVString(value string) map[string]string {
 			continue
 		}
 		kv := strings.SplitN(it, "=", 2)
-		value := ""
 		key := kv[0]
+		if key == "" {
+			continue
+		}
+		value := ""
 		if len(kv) == 2 {
 			value = kv[1]
 		}
