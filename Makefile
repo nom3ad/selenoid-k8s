@@ -33,6 +33,13 @@ image: build
 run-k8s:
 	go run .  -orchestrator kubernetes $$args
 
+.PHONY: run-ecs
+run-ecs:
+	@set -e;\
+	args="--orchestrator=aws-ecs $$(sed "s/ aws-ecs/ --aws-ecs/g" <<<$${MAKEFLAGS#" --"})"; \
+	export AWS_REGION=$${AWS_REGION:=$$region}; \
+	echo "$$args"; \
+	go run . $$args
 
 .PHONY: run-demo
 run-demo:

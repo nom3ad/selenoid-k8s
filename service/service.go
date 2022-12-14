@@ -88,6 +88,12 @@ func (m *DefaultManager) Find(caps session.Caps, requestId uint64) (Starter, boo
 				ServiceBase: serviceBase,
 				Environment: *m.Environment,
 				Caps:        caps}, true
+		case "aws-ecs":
+			log.Printf("[%d] [USING_AWS_ECS] [%s]", requestId, browserName)
+			return &AWSElasticContainerService{
+				ServiceBase: serviceBase,
+				Environment: *m.Environment,
+				Caps:        caps}, true
 		case "docker":
 			if m.Client == nil {
 				return nil, false

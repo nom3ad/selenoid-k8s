@@ -414,7 +414,7 @@ func (k *Kubernetes) parseIntoHostAlias(alias string) apiv1.HostAlias {
 	}
 }
 
-func StreamK8sPodLogs(requestId uint64, sess *session.Session, wsConn *websocket.Conn, sid string) error {
+func StreamKubernetesContainerLogs(requestId uint64, sess *session.Session, wsConn *websocket.Conn, sid string) error {
 	log.Printf("[%d] [POD_LOGS] [%s/%s]", requestId, sess.Pod.Name, sess.Pod.ContainerName)
 	k8sClient, err := getK8sClient()
 	if err != nil {

@@ -739,7 +739,9 @@ func streamLogs(wsconn *websocket.Conn) {
 		stdcopy.StdCopy(wsconn, wsconn, r)
 		log.Printf("[%d] [CONTAINER_LOGS_DISCONNECTED] [%s]", requestId, sid)
 	} else if sess.Orchestrator == "kubernetes" {
-		_ = service.StreamK8sPodLogs(requestId, sess, wsconn, sid)
+		_ = service.StreamKubernetesContainerLogs(requestId, sess, wsconn, sid)
+	} else if sess.Orchestrator == "aws-ecs" {
+		_ = service.StreamAWSECSContainerLogs(requestId, sess, wsconn, sid)
 	} else {
 		log.Printf("[%d] [%s] [INVALID_ORCHESTRATOR] [%s] ", requestId, sid, sess.Orchestrator)
 	}
