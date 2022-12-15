@@ -70,11 +70,12 @@ type Container struct {
 }
 
 type Pod struct {
-	ID            string `json:"id"`
-	IPAddress     string `json:"ip"`
-	Name          string `json:"podname"`
-	ContainerName string `json:"containername"`
-	Namespace     string `json:"namespace"`
+	ID            string            `json:"id"`
+	IPAddress     string            `json:"ip"`
+	Name          string            `json:"podname"`
+	ContainerName string            `json:"containername"`
+	Namespace     string            `json:"namespace"`
+	Configuration map[string]string `json:"configuration"` // Additional info about container, eg:logging
 }
 
 // Session - holds session info
@@ -83,7 +84,7 @@ type Session struct {
 	Caps         Caps
 	URL          *url.URL
 	Orchestrator string
-	Pod          *Pod       // for other orchestrator
+	Pod          *Pod       // for other orchestrators
 	Container    *Container // Original docker implementation
 	HostPort     HostPort
 	Origin       string

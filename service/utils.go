@@ -20,7 +20,7 @@ func parseCommaSeparatedString(value string) []string {
 	return list
 }
 
-func jsonUnmarshalOnTrimmedValue(s string, v any) error {
+func jsonUnmarshalIfNonEmpty(s string, v any) error {
 	s = strings.TrimSpace(s)
 	if s != "" {
 		return json.Unmarshal([]byte(s), v)
@@ -53,6 +53,16 @@ func fullyQualifiedImageName(image string) string {
 func int64Ptr[T int | int32 | int8 | int16 | int64 | float32 | float64](v T) *int64 {
 	i := int64(v)
 	return &i
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, v := range values {
+		v := strings.TrimSpace(v)
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func nonEmptyStringPtr(value string) *string {
