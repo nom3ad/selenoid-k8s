@@ -43,3 +43,7 @@ run-ecs:
 .PHONY: run-demo
 run-demo:
 	python demo/main.py
+
+.PHONY: run-selenoid-ui
+run-selenoid-ui:
+	docker run --rm --name selenoid-ui -it --net=host aerokube/selenoid-ui

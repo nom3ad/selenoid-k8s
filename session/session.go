@@ -71,10 +71,11 @@ type Container struct {
 
 type Pod struct {
 	ID            string            `json:"id"`
-	IPAddress     string            `json:"ip"`
 	Name          string            `json:"podname"`
 	ContainerName string            `json:"containername"`
+	ContainerId   string            `json:"containerId"`
 	Namespace     string            `json:"namespace"`
+	IPAddress     string            `json:"ip"`
 	Configuration map[string]string `json:"configuration"` // Additional info about container, eg:logging
 }
 

@@ -4,14 +4,45 @@ import time
 from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
 
+chromeServerlessArgs = [
+    # https://github.com/alixaxel/chrome-aws-lambda/blob/master/source/index.ts
+    "headless",
+    "single-process",
+    # "start-maximized",
+    "allow-running-insecure-content",
+    "autoplay-policy=user-gesture-required",
+    "disable-component-update",
+    "disable-domain-reliability",
+    "disable-features=AudioServiceOutOfProcess,IsolateOrigins,site-per-process",
+    "disable-print-preview",
+    "disable-setuid-sandbox",
+    "disable-site-isolation-trials",
+    "disable-speech-api",
+    "disable-web-security",
+    "disk-cache-size=33554432",
+    "enable-features=SharedArrayBuffer",
+    "hide-scrollbars",
+    "ignore-gpu-blocklist",
+    "in-process-gpu",
+    "mute-audio",
+    "no-default-browser-check",
+    "no-pings",
+    "no-sandbox",
+    "no-zygote",
+    "use-gl=swiftshader",
+    "window-size=1920,1080",
+    # "disable-gpu",
+    "disable-dev-shm-usage",
+]
 driver = webdriver.Remote(
     command_executor="http://127.0.0.1:4444/wd/hub",
     # command_executor="http://10.96.156.23:4444/wd/hub", # selnoid
     # command_executor="http://10.96.147.40:8085",  # healenium
     # command_executor="http://168.138.103.201:8085",  # healenium
     desired_capabilities={
-        "browserName": "chrome",
-        # "browserName": "firefox",
+        # "browserName": "chrome",
+        # "goog:chromeOptions": {"args": chromeServerlessArgs},
+        "browserName": "firefox",
         # "browserVersion": "latest",
         # "video": "True",
         # "platform": "WIN10",

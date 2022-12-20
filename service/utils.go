@@ -3,8 +3,10 @@ package service
 import (
 	"encoding/json"
 	"net"
+	"reflect"
 	"strconv"
 	"strings"
+	"unsafe"
 
 	"github.com/aerokube/selenoid/session"
 )
@@ -73,6 +75,13 @@ func nonEmptyStringPtr(value string) *string {
 	return &v
 }
 
+func mustParseInt(value string) int {
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		panic(err)
+	}
+	return n
+}
 func parseKVString(value string) map[string]string {
 	mapping := map[string]string{}
 	for _, it := range strings.Split(value, ",") {
@@ -120,4 +129,23 @@ func buildHostPort(ip string, caps session.Caps) session.HostPort {
 	}
 
 	return hp
+}
+
+// https://stackoverflow.com/questions/42664837/how-to-access-unexported-struct-fields
+
+func GetUnexportedField(field reflect.Value) any {
+	return reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().Interface()
+}
+
+func SetUnexportedField(field reflect.Value, value any) {
+	reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).
+		Elem().
+		Set(reflect.ValueOf(value))
+}
+
+func SetUnexportedFieldOfStruct(structPtr any, fieldName string, value any) {
+	field := reflect.ValueOf(structPtr).Elem().FieldByName(fieldName)
+	reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).
+		Elem().
+		Set(reflect.ValueOf(value))
 }

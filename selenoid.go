@@ -191,13 +191,15 @@ func create(w http.ResponseWriter, r *http.Request) {
 		queue.Drop()
 		return
 	}
+	serviceStartTime := time.Now()
 	startedService, err := starter.StartWithCancel()
 	if err != nil {
-		log.Printf("[%d] [SERVICE_STARTUP_FAILED] [%v]", requestId, err)
+		log.Printf("[%d] [SERVICE_STARTUP_FAILED] [%.2fs elapsed] [%v]", requestId, time.Since(serviceStartTime).Seconds(), err)
 		jsonerror.SessionNotCreated(err).Encode(w)
 		queue.Drop()
 		return
 	}
+	log.Printf("[%d] [SERVICE_STARTUP_SUCCESS] [%.2fs elapsed]", requestId, time.Since(serviceStartTime).Seconds())
 	u := startedService.Url
 	cancel := startedService.Cancel
 	host := "localhost"
@@ -716,6 +718,8 @@ func listFilesAsJson(requestId uint64, w http.ResponseWriter, dir string, errSta
 
 func streamLogs(wsconn *websocket.Conn) {
 	defer wsconn.Close()
+	ctx := wsconn.Request().Context()
+	wsconn.PayloadType = websocket.BinaryFrame
 	requestId := serial()
 	sid, _ := splitRequestPath(wsconn.Request().URL.Path)
 	sess, ok := sessions.Get(sid)
@@ -735,13 +739,15 @@ func streamLogs(wsconn *websocket.Conn) {
 			return
 		}
 		defer r.Close()
-		wsconn.PayloadType = websocket.BinaryFrame
 		stdcopy.StdCopy(wsconn, wsconn, r)
 		log.Printf("[%d] [CONTAINER_LOGS_DISCONNECTED] [%s]", requestId, sid)
 	} else if sess.Orchestrator == "kubernetes" {
-		_ = service.StreamKubernetesContainerLogs(requestId, sess, wsconn, sid)
+		service.StreamKubernetesContainerLogs(ctx, requestId, sess, wsconn, sid)
 	} else if sess.Orchestrator == "aws-ecs" {
-		_ = service.StreamAWSECSContainerLogs(requestId, sess, wsconn, sid)
+		err := service.StreamAWSECSContainerLogs(ctx, requestId, sess, wsconn, sid)
+		if err != nil {
+			log.Printf("[%d] [%s] [STREAM_LOG_ERROR] [%s] ", requestId, sid, err)
+		}
 	} else {
 		log.Printf("[%d] [%s] [INVALID_ORCHESTRATOR] [%s] ", requestId, sid, sess.Orchestrator)
 	}

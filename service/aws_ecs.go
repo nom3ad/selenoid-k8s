@@ -1,12 +1,15 @@
 package service
 
 import (
+	"context"
 	"crypto/md5"
 	"encoding/base64"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,8 +17,8 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	aws_session "github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go/service/ecs"
-	"golang.org/x/net/websocket"
 )
 
 var flags = struct {
@@ -95,6 +98,7 @@ func (s *AWSElasticContainerService) StartWithCancel() (*StartedService, error) 
 		return nil, fmt.Errorf("could not find a container ip")
 	}
 	taskArn := *ecsTask.TaskArn
+	taskId := strings.Split(taskArn, "/")[2] //arn:aws:ecs:us-east-1:1234567890:task/<cluster>/xxxxxxxxx
 	clusterArn := *ecsTask.ClusterArn
 	logConfiguration := taskDefinition.ContainerDefinitions[0].LogConfiguration
 	hostPort := buildHostPort(containerIp, s.Caps)
@@ -109,8 +113,9 @@ func (s *AWSElasticContainerService) StartWithCancel() (*StartedService, error) 
 		Url:          u,
 		Pod: &session.Pod{
 			ID:            taskArn,
-			Name:          containerRuntimeId,
+			Name:          taskId,
 			ContainerName: containerName,
+			ContainerId:   containerRuntimeId,
 			Namespace:     clusterArn,
 			IPAddress:     containerIp,
 			Configuration: map[string]string{
@@ -140,13 +145,16 @@ func (s *AWSElasticContainerService) registerTaskDefinition(ecsClient *ecs.ECS, 
 	if aws.StringValue(logConfiguration.LogDriver) == "awslogs" {
 		// https://docs.aws.amazon.com/AmazonECS/latest/developerguide/using_awslogs.html#specify-log-config
 		if aws.StringValue(logConfiguration.Options["awslogs-region"]) == "" {
-			logConfiguration.Options["awslogs-region"] = ecsClient.Config.Region // If not specified, use task's region
+			// If not specified, use task's region
+			logConfiguration.Options["awslogs-region"] = ecsClient.Config.Region
 		}
 		if aws.StringValue(logConfiguration.Options["awslogs-group"]) == "" {
-			logConfiguration.Options["awslogs-group"] = aws.String("ecs/selenoid") // Optional for the EC2 launch type, required for the Fargate launch type.
+			// Optional for the EC2 launch type, required for the Fargate launch type.
+			logConfiguration.Options["awslogs-group"] = aws.String("ecs/selenoid")
 		}
 		if aws.StringValue(logConfiguration.Options["awslogs-stream-prefix"]) == "" {
-			logConfiguration.Options["awslogs-stream-prefix"] = aws.String(image) // Optional for the EC2 launch type, required for the Fargate launch type.
+			// Optional for the EC2 launch type, required for the Fargate launch type.
+			logConfiguration.Options["awslogs-stream-prefix"] = aws.String(s.BrowserName())
 		}
 	}
 
@@ -165,7 +173,7 @@ func (s *AWSElasticContainerService) registerTaskDefinition(ecsClient *ecs.ECS, 
 	containerDef := ecs.ContainerDefinition{
 		Name:         &containerName,
 		Image:        &image,
-		Memory:       aws.Int64(128), // Dummy, will override in task run
+		Memory:       aws.Int64(512), // Dummy, will override in task run
 		PortMappings: s.getPortMapping(),
 		DnsServers:   aws.StringSlice(dnServers),
 	}
@@ -241,17 +249,22 @@ func (s *AWSElasticContainerService) runTask(ecsClient *ecs.ECS, taskDefArn stri
 		}
 	}
 	tags := s.getTags()
-
-	var cpu, memory string
+	var err error
+	var cpu int = 256    // Fargate minimum value
+	var memory int = 512 // Fargate minimum value
 	if s.Service.Cpu != "" {
-		cpu = s.Service.Cpu
+		if cpu, err = strconv.Atoi(s.Service.Cpu); err != nil {
+			return nil, fmt.Errorf("invalid cpu value: %s", s.Service.Cpu)
+		}
 	} else if s.Environment.CPU > 0 {
-		cpu = fmt.Sprint(s.Environment.CPU)
+		cpu = int(s.Environment.CPU)
 	}
 	if s.Service.Mem != "" {
-		memory = s.Service.Mem
+		if memory, err = strconv.Atoi(s.Service.Mem); err != nil {
+			return nil, fmt.Errorf("invalid Mem value: %s", s.Service.Mem)
+		}
 	} else if s.Environment.Memory > 0 {
-		memory = fmt.Sprint(s.Environment.Memory)
+		memory = int(s.Environment.Memory)
 	}
 
 	var command []*string
@@ -272,8 +285,8 @@ func (s *AWSElasticContainerService) runTask(ecsClient *ecs.ECS, taskDefArn stri
 		EnableExecuteCommand:     &enableExecuteCommand,
 		PlacementConstraints:     placementConstrains,
 		Overrides: &ecs.TaskOverride{
-			Cpu:              nonEmptyStringPtr(cpu),
-			Memory:           nonEmptyStringPtr(memory),
+			Cpu:              aws.String(strconv.Itoa(cpu)),
+			Memory:           aws.String(strconv.Itoa(memory)),
 			ExecutionRoleArn: nonEmptyStringPtr(executionRoleArn),
 			TaskRoleArn:      nonEmptyStringPtr(taskRoleArn),
 			ContainerOverrides: []*ecs.ContainerOverride{
@@ -281,9 +294,9 @@ func (s *AWSElasticContainerService) runTask(ecsClient *ecs.ECS, taskDefArn stri
 					Name:        &containerName,
 					Command:     command,
 					Environment: environment,
+					Cpu:         int64Ptr(cpu),
+					Memory:      int64Ptr(memory),
 					// EnvironmentFiles: ,
-					// Cpu: ,
-					// Memory: ,
 					// MemoryReservation:
 					// ResourceRequirements: , ,
 				},
@@ -333,7 +346,7 @@ func (s *AWSElasticContainerService) runTask(ecsClient *ecs.ECS, taskDefArn stri
 		if aws.StringValue(task.LastStatus) == "STOPPED" {
 			return nil, fmt.Errorf("task was stopped unexpectedly. %s (code=%s)", aws.StringValue(task.StoppedReason), aws.StringValue(task.StopCode))
 		}
-		log.Printf("[%d] [WAITING_FOR_TASK] [%s] [lastStatus:%s] [connectivity: %s] [Container:%s] [IP: %s] [Agents: %s]",
+		log.Printf("[%d] [WAITING_FOR_TASK] [%s] [lastStatus:%s] [Container:%s] [connectivity: %s] [IP: %s] [Agents: %s]",
 			requestID, *task.TaskArn, aws.StringValue(task.LastStatus), containerRuntimeId, aws.StringValue(task.Connectivity), ip, agentStatus)
 		time.Sleep(checkInterval)
 	}
@@ -406,7 +419,54 @@ func (s *AWSElasticContainerService) stopTask(ecsClient *ecs.ECS, task string, c
 	log.Printf("[%d] [TASK_STOPPED] [%s] [%s]", requestID, cluster, task)
 }
 
-func StreamAWSECSContainerLogs(requestId uint64, sess *session.Session, wsConn *websocket.Conn, sid string) (err error) {
-	log.Printf("[%d] [ECS_CONTAINER_LOGS] [%s/%s]", requestId, sess.Pod.Name, sess.Pod.ContainerName)
-	return fmt.Errorf("not implemented")
+func StreamAWSECSContainerLogs(ctx context.Context, requestId uint64, sess *session.Session, writer io.Writer, sid string) (err error) {
+	log.Printf("[%d] [ECS_CONTAINER_LOGS] [%s/%s]", requestId, sess.Pod.Name, sess.Pod.ContainerId)
+
+	var logConfiguration ecs.LogConfiguration
+	if err := jsonUnmarshalIfNonEmpty(sess.Pod.Configuration["logConfiguration"], &logConfiguration); err != nil {
+		return fmt.Errorf("invalid LogConfiguration: %q: %w", sess.Pod.Configuration["logConfiguration"], err)
+	}
+	if aws.StringValue(logConfiguration.LogDriver) != "awslogs" {
+		return fmt.Errorf("unsupported log-driver: %q", aws.StringValue(logConfiguration.LogDriver))
+	}
+	region := aws.StringValue(logConfiguration.Options["awslogs-region"])
+	logGroupName := aws.StringValue(logConfiguration.Options["awslogs-group"])
+	logStreamPrefix := aws.StringValue(logConfiguration.Options["awslogs-stream-prefix"])
+	taskArn := sess.Pod.ID
+	taskId := strings.Split(taskArn, "/")[2]
+	// https://docs.aws.amazon.com/AmazonECS/latest/developerguide/using_awslogs.html
+	logStreamName := logStreamPrefix + "/" + sess.Pod.ContainerName + "/" + taskId
+
+	cwLogsClient := cloudwatchlogs.New(awsSession, &aws.Config{Region: &region})
+
+	getLogEventsInput := cloudwatchlogs.GetLogEventsInput{
+		StartFromHead: aws.Bool(true),
+		LogGroupName:  &logGroupName,
+		LogStreamName: &logStreamName,
+	}
+	for {
+		log.Printf("[%d] [GET_LOG_EVENTS] [%s|%s] ", requestId, logGroupName, logStreamName)
+		output, err := cwLogsClient.GetLogEventsWithContext(ctx, &getLogEventsInput)
+		if err != nil {
+			return fmt.Errorf("error while GetLogEvents(): %w", err)
+		}
+		if len(output.Events) == 0 {
+			_, err := io.WriteString(writer, "")
+			if err != nil {
+				return fmt.Errorf("ws ping write error: %w", err)
+			}
+		} else {
+			for _, ev := range output.Events {
+				msg := aws.StringValue(ev.Message)
+				ts := time.UnixMilli(aws.Int64Value(ev.Timestamp)).Format("2006-01-02T15:04:05")
+				line := ts + " " + msg + "\n"
+				_, err := io.WriteString(writer, line)
+				if err != nil {
+					return fmt.Errorf("ws log write error: %w", err)
+				}
+			}
+		}
+		getLogEventsInput.NextToken = output.NextForwardToken
+		time.Sleep(1 * time.Second)
+	}
 }

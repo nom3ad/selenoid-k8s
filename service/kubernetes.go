@@ -204,7 +204,7 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 		return nil, fmt.Errorf("start pod: %v", err)
 	}
 
-	if err := k.waitForPodToBeReady(k8sClient, namespace, podName, k.StartupTimeout); err != nil {
+	if podObj, err = k.waitForPodToBeReady(k8sClient, namespace, podName, k.StartupTimeout); err != nil {
 		k.deletePod(podName, namespace, k8sClient, requestID)
 		return nil, fmt.Errorf("status pod: %v", err)
 	}
@@ -227,9 +227,10 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 		Orchestrator: "kubernetes",
 		Pod: &session.Pod{
 			ID:            string(podObj.GetUID()),
-			IPAddress:     podIP,
 			Name:          podObj.GetName(),
+			IPAddress:     podIP,
 			ContainerName: containerName,
+			ContainerId:   podObj.Status.ContainerStatuses[0].ContainerID,
 			Namespace:     namespace,
 		},
 		HostPort: hostPort,
@@ -275,12 +276,12 @@ func (k *Kubernetes) getPodIP(name string, ns string, k8sClient *kubernetes.Clie
 	return ip
 }
 
-func (k *Kubernetes) waitForPodToBeReady(k8sClient *kubernetes.Clientset, namespace, podName string, timeout time.Duration) error {
+func (k *Kubernetes) waitForPodToBeReady(k8sClient *kubernetes.Clientset, namespace, podName string, timeout time.Duration) (*apiv1.Pod, error) {
 
 	ctx := context.Background()
 	podObj, err := k8sClient.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	status := podObj.Status
@@ -289,7 +290,7 @@ func (k *Kubernetes) waitForPodToBeReady(k8sClient *kubernetes.Clientset, namesp
 		FieldSelector: fields.OneTermEqualSelector("metadata.name", podName).String(),
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if podObj.Status.Phase == apiv1.PodPending {
 		startedAt := time.Now()
@@ -300,7 +301,7 @@ func (k *Kubernetes) waitForPodToBeReady(k8sClient *kubernetes.Clientset, namesp
 					if !ok {
 						return
 					}
-					if podObj, ok := ev.Object.(*apiv1.Pod); ok {
+					if podObj, ok = ev.Object.(*apiv1.Pod); ok {
 						status = podObj.Status
 						if podObj.Status.Phase != apiv1.PodPending {
 							w.Stop()
@@ -317,9 +318,9 @@ func (k *Kubernetes) waitForPodToBeReady(k8sClient *kubernetes.Clientset, namesp
 		}()
 	}
 	if status.Phase != apiv1.PodRunning {
-		return fmt.Errorf("unavailable pod: %v", status.Phase)
+		return nil, fmt.Errorf("unavailable pod: %v", status.Phase)
 	}
-	return nil
+	return podObj, nil
 }
 
 func (k *Kubernetes) getEnvVars(service ServiceBase, caps session.Caps) []apiv1.EnvVar {
@@ -414,7 +415,7 @@ func (k *Kubernetes) parseIntoHostAlias(alias string) apiv1.HostAlias {
 	}
 }
 
-func StreamKubernetesContainerLogs(requestId uint64, sess *session.Session, wsConn *websocket.Conn, sid string) error {
+func StreamKubernetesContainerLogs(ctx context.Context, requestId uint64, sess *session.Session, writer *websocket.Conn, sid string) error {
 	log.Printf("[%d] [POD_LOGS] [%s/%s]", requestId, sess.Pod.Name, sess.Pod.ContainerName)
 	k8sClient, err := getK8sClient()
 	if err != nil {
@@ -427,14 +428,13 @@ func StreamKubernetesContainerLogs(requestId uint64, sess *session.Session, wsCo
 		Previous:   false,
 		Timestamps: false,
 	})
-	r, err := req.Stream(wsConn.Request().Context())
+	reader, err := req.Stream(ctx)
 	if err != nil {
 		log.Printf("[%d] [POD_LOGS_STREAM_ERROR] [%s/%s] [err=%v]", requestId, sess.Pod.Name, sess.Pod.ContainerName, err)
 		return err
 	}
-	defer r.Close()
-	wsConn.PayloadType = websocket.BinaryFrame
-	_, err = io.Copy(wsConn, r)
+	defer reader.Close()
+	_, err = io.Copy(writer, reader)
 	log.Printf("[%d] [POD_LOGS_STREAM_DISCONNECTED] [%s/%s] [%s] [err=%s]", requestId, sess.Pod.Name, sess.Pod.ContainerName, sid, err)
 	return nil
 }
