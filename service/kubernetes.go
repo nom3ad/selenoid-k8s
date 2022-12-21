@@ -216,7 +216,7 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 
 	u := &url.URL{Scheme: "http", Host: hostPort.Selenium, Path: k.Service.Path}
 
-	log.Printf("[%d] [SELENIUM_URL] [%s] [%s]", requestID, podName, u.String())
+	log.Printf("[%d] [WAIT_FOR_SELENIUM_URL] [%s] [%s]", requestID, podName, u.String())
 
 	if err := wait(u.String(), k.StartupTimeout); err != nil {
 		k.deletePod(podName, namespace, k8sClient, requestID)
@@ -277,22 +277,18 @@ func (k *Kubernetes) getPodIP(name string, ns string, k8sClient *kubernetes.Clie
 }
 
 func (k *Kubernetes) waitForPodToBeReady(k8sClient *kubernetes.Clientset, namespace, podName string, timeout time.Duration) (*apiv1.Pod, error) {
-
 	ctx := context.Background()
 	podObj, err := k8sClient.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
-
-	status := podObj.Status
-
-	w, err := k8sClient.CoreV1().Pods(namespace).Watch(ctx, metav1.ListOptions{
-		FieldSelector: fields.OneTermEqualSelector("metadata.name", podName).String(),
-	})
-	if err != nil {
-		return nil, err
-	}
 	if podObj.Status.Phase == apiv1.PodPending {
+		w, err := k8sClient.CoreV1().Pods(namespace).Watch(ctx, metav1.ListOptions{
+			FieldSelector: fields.OneTermEqualSelector("metadata.name", podName).String(),
+		})
+		if err != nil {
+			return nil, err
+		}
 		startedAt := time.Now()
 		func() {
 			for {
@@ -301,26 +297,29 @@ func (k *Kubernetes) waitForPodToBeReady(k8sClient *kubernetes.Clientset, namesp
 					if !ok {
 						return
 					}
-					if podObj, ok = ev.Object.(*apiv1.Pod); ok {
-						status = podObj.Status
+					if obj, ok := ev.Object.(*apiv1.Pod); ok {
+						podObj = obj
 						if podObj.Status.Phase != apiv1.PodPending {
 							w.Stop()
+							return
 						}
 					} else {
 						log.Printf("[UNHANDLED EVENT] [Pod=%s] [%s] Obj=\n%s", podName, ev.Type, yamlifyObject(ev.Object))
 					}
 				case <-time.After(timeout):
+					log.Printf("[WAITING FOR POD] timedout after %.2fs", timeout.Seconds())
 					w.Stop()
+					return
 				case <-time.NewTicker(3 * time.Second).C:
-					log.Printf("[WAITING FOR POD] [Pod=%s] [%s] [%s]", podName, status.Phase, time.Since(startedAt).Truncate(time.Second).String())
+					log.Printf("[WAITING FOR POD] [Pod=%s] [%s] [%s]", podName, podObj.Status.Phase, time.Since(startedAt).Truncate(time.Second).String())
 				}
 			}
 		}()
 	}
-	if status.Phase != apiv1.PodRunning {
-		return nil, fmt.Errorf("unavailable pod: %v", status.Phase)
+	if podObj.Status.Phase == apiv1.PodRunning {
+		return podObj, nil
 	}
-	return podObj, nil
+	return nil, fmt.Errorf("unavailable pod: %v", podObj.Status.Phase)
 }
 
 func (k *Kubernetes) getEnvVars(service ServiceBase, caps session.Caps) []apiv1.EnvVar {
