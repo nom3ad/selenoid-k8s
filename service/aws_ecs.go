@@ -34,6 +34,7 @@ var flags = struct {
 	AwsECSLogConfiguration         string
 	AwsECSTaskPlacementConstraints string
 	AwsECSTaskTags                 string
+	AwsECSTaskDefinitionNamePrefix string
 }{}
 
 var awsSession *aws_session.Session
@@ -51,6 +52,7 @@ func InitAWSElasticContainerServiceFlags() {
 	flag.StringVar(&flags.AwsECSLogConfiguration, "aws-ecs-log-configuration", "", "AWS ECS ContainerDefinition.logConfiguration as JSON object string. eg:  {\"logDriver\":\"awslogs\",\"options\":{\"awslogs-group\":\"ecs/selenoid\"}}")
 	flag.StringVar(&flags.AwsECSTaskPlacementConstraints, "aws-ecs-task-placement-constraints", "", "AWS ECS []PlacementConstraint as JSON list string")
 	flag.StringVar(&flags.AwsECSTaskTags, "aws-ecs-task-tags", "", "AWS ECS Task tags as key1=value=1,key2=value2 format")
+	flag.StringVar(&flags.AwsECSTaskDefinitionNamePrefix, "aws-ecs-task-definition-name-prefix", "", "AWS ECS Task definition name prefix")
 }
 
 // AWSElasticContainerService
@@ -131,8 +133,7 @@ func (s *AWSElasticContainerService) StartWithCancel() (*StartedService, error) 
 }
 
 func (s *AWSElasticContainerService) registerTaskDefinition(ecsClient *ecs.ECS, image string, containerName string, requestID uint64) (*ecs.TaskDefinition, error) {
-	image = fullyQualifiedImageName(image)
-	requiresCompatibilities := []string{"EC2", "FARGATE"}
+	requiresCompatibilities := []string{ecs.CompatibilityEc2, ecs.CompatibilityFargate}
 	dnServers := s.Caps.DNSServers
 	networkMode := flags.AwsECSNetworkMode
 	if s.Environment.Network != "default" && s.Environment.Network != "" {
@@ -159,6 +160,7 @@ func (s *AWSElasticContainerService) registerTaskDefinition(ecsClient *ecs.ECS, 
 	}
 
 	family := s.deriveTaskDefinitionFamilyName(image, containerName, requiresCompatibilities, dnServers, logConfiguration)
+	image = fullyQualifiedImageName(image)
 	log.Printf("[%d] [CHECK_IF_TASK_DEFINITION_EXISTS] image=%s family=%s", requestID, image, family)
 	describeOutput, err := ecsClient.DescribeTaskDefinition(&ecs.DescribeTaskDefinitionInput{
 		TaskDefinition: &family,
@@ -207,8 +209,8 @@ func (s *AWSElasticContainerService) deriveTaskDefinitionFamilyName(image string
 		}
 	}
 	hash := md5.Sum([]byte(hashInput))
-	replacer := strings.NewReplacer(".", "_", "/", "_")
-	familyName := replacer.Replace(image) + "-" + base64.RawURLEncoding.EncodeToString(hash[:8])
+	replacer := strings.NewReplacer(".", "_", "/", "_", ":", "_")
+	familyName := flags.AwsECSTaskDefinitionNamePrefix + replacer.Replace(image) + "-" + base64.RawURLEncoding.EncodeToString(hash[:8])
 	return familyName
 }
 
@@ -279,6 +281,7 @@ func (s *AWSElasticContainerService) runTask(ecsClient *ecs.ECS, taskDefArn stri
 		Cluster:                  nonEmptyStringPtr(clusterName),
 		StartedBy:                &startedBy,
 		Tags:                     tags,
+		PropagateTags:            aws.String("TASK_DEFINITION"),
 		CapacityProviderStrategy: capacityProviderStrategy,
 		NetworkConfiguration:     networkConfiguration,
 		EnableECSManagedTags:     &enableECSManagedTags,
