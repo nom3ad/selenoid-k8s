@@ -342,6 +342,7 @@ func (s *AWSElasticContainerService) runTask(ecsClient *ecs.ECS, taskDefArn stri
 		}
 		task = describeTaskOutput.Tasks[0]
 		containerRuntimeId, ip, agentStatus := s.getContainerInfo(*task)
+		// https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-lifecycle.html
 		if aws.StringValue(task.LastStatus) == "RUNNING" {
 			log.Printf("[%d] [TASK_RUNNING] [%s] [containerId: %s] %s", requestID, *task.TaskArn, containerRuntimeId, jsonMarshal(task))
 			return task, nil
