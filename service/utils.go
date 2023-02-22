@@ -149,3 +149,28 @@ func SetUnexportedFieldOfStruct(structPtr any, fieldName string, value any) {
 		Elem().
 		Set(reflect.ValueOf(value))
 }
+
+func Range(min, max, step int) []int {
+	slice := make([]int, 0, (max-min)/step+1)
+	for i := min; i <= max; i += step {
+		slice = append(slice, i)
+	}
+	return slice
+}
+
+func Keys[K comparable, V any](m map[K]V) []K {
+	keys := make([]K, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func Contains[T comparable](slice []T, v T) bool {
+	for _, s := range slice {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}

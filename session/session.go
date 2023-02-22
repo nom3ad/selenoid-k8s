@@ -39,6 +39,9 @@ type Caps struct {
 	SessionTimeout        string            `json:"sessionTimeout,omitempty"`
 	S3KeyPattern          string            `json:"s3KeyPattern,omitempty"`
 	ExtensionCapabilities *Caps             `json:"selenoid:options,omitempty"`
+	//
+	Cpu string `json:"cpu,omitempty"`
+	Mem string `json:"mem,omitempty"`
 }
 
 func (c *Caps) ProcessExtensionCapabilities() {

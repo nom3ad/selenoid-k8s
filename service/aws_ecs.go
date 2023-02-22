@@ -254,19 +254,47 @@ func (s *AWSElasticContainerService) runTask(ecsClient *ecs.ECS, taskDefArn stri
 	var err error
 	var cpu int = 256    // Fargate minimum value
 	var memory int = 512 // Fargate minimum value
-	if s.Service.Cpu != "" {
+	ecsTaskSizeDocLink := "https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task_definition_parameters.html#task_size"
+	validTaskSizes := map[int][]int{
+		256:   {512, 1 * 1024, 2 * 1024},
+		512:   Range(1*1024, 4*1024, 1*1024),
+		1024:  Range(2*1024, 8*1024, 1*1024),
+		2048:  Range(4*1024, 16*1024, 1*1024),
+		4096:  Range(8*1024, 30*1024, 1*1024),
+		8192:  Range(16*1024, 60*1024, 4*1024),
+		16384: Range(32*1024, 120*1024, 8*1024),
+	}
+
+	if s.Caps.Cpu != "" {
+		if cpu, err = strconv.Atoi(s.Caps.Cpu); err != nil {
+			return nil, fmt.Errorf("invalid cpu value found in capabilities: %s | valid values: %v | see %s", s.Service.Cpu, Keys(validTaskSizes), ecsTaskSizeDocLink)
+		}
+	} else if s.Service.Cpu != "" {
 		if cpu, err = strconv.Atoi(s.Service.Cpu); err != nil {
-			return nil, fmt.Errorf("invalid cpu value: %s", s.Service.Cpu)
+			return nil, fmt.Errorf("invalid cpu value found in browser config: %s | valid values: %v | see %s", s.Service.Cpu, Keys(validTaskSizes), ecsTaskSizeDocLink)
 		}
 	} else if s.Environment.CPU > 0 {
 		cpu = int(s.Environment.CPU)
 	}
-	if s.Service.Mem != "" {
+	if _, ok := validTaskSizes[cpu]; !ok {
+		return nil, fmt.Errorf("invalid cpu value: %s, valid values are: %v | See %s", s.Service.Mem, Keys(validTaskSizes), ecsTaskSizeDocLink)
+	}
+	validMemValues := validTaskSizes[cpu]
+	if s.Caps.Mem != "" {
+		if memory, err = strconv.Atoi(s.Caps.Mem); err != nil {
+			return nil, fmt.Errorf("invalid mem value found in capabilities: %s | valid values: %v | see %s", s.Service.Cpu, validMemValues, ecsTaskSizeDocLink)
+		}
+	} else if s.Service.Mem != "" {
 		if memory, err = strconv.Atoi(s.Service.Mem); err != nil {
-			return nil, fmt.Errorf("invalid Mem value: %s", s.Service.Mem)
+			return nil, fmt.Errorf("invalid mem value found in browser config: %s | valid values: %v | see %s", s.Service.Cpu, validMemValues, ecsTaskSizeDocLink)
 		}
 	} else if s.Environment.Memory > 0 {
 		memory = int(s.Environment.Memory)
+	} else {
+		memory = validMemValues[0] // valid min memory value for given cpu value
+	}
+	if !Contains(validMemValues, memory) {
+		return nil, fmt.Errorf("invalid mem value: %sMiB, For cpu=%d, valid values are %v | See %s", s.Service.Mem, cpu, validMemValues, ecsTaskSizeDocLink)
 	}
 
 	var command []*string
