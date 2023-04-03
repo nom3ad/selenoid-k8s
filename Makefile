@@ -1,7 +1,7 @@
 GOOS?=linux
 GOARCH?=amd64
 
-PKG=github.com/nom3ad/selenoid-k8s
+PKG=github.com/nom3ad/selenoid-ng
 TAG ?= $(shell cat TAG)
 REPO_INFO ?= $(shell git config --get remote.origin.url || basename $$(pwd))
 COMMIT_SHA ?= git-$(shell git rev-parse --short HEAD)
@@ -25,7 +25,7 @@ build:
 .PHONY: image
 image: build
 	@set -e; \
-	tag=$${tag:-selenoid-k8s}; \
+	tag=$${tag:-selenoid-ng}; \
 	docker build --build-arg TARGETOS=$(GOOS) --build-arg TARGETARCH=$(GOARCH) --build-arg BUILDPLATFORM=$(GOOS) --platform=linux/x86_64 -t $$tag -f Dockerfile .; \
 	read -p "Push (Y/n)?" && [[ $${REPLY,} == "y" ]] && docker push $$tag;
 
