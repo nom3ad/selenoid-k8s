@@ -180,6 +180,8 @@ func init() {
 	}
 
 	log.Printf("[-] [INIT] [Selenoid is running with %s as orchestrator]", orchestrator)
+	environmentDump, _ := json.Marshal(environment)
+	log.Printf("[-] [INIT] [Config Environment] %s", environmentDump)
 	if orchestrator != "docker" {
 		disableDocker = true
 		manager = &service.DefaultManager{Environment: &environment, Config: conf}

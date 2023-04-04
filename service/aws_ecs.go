@@ -267,34 +267,34 @@ func (s *AWSElasticContainerService) runTask(ecsClient *ecs.ECS, taskDefArn stri
 
 	if s.Caps.Cpu != "" {
 		if cpu, err = strconv.Atoi(s.Caps.Cpu); err != nil {
-			return nil, fmt.Errorf("invalid cpu value found in capabilities: %s | valid values: %v | see %s", s.Service.Cpu, Keys(validTaskSizes), ecsTaskSizeDocLink)
+			return nil, fmt.Errorf("invalid cpu value found in capabilities: %s | valid values: %v | see %s", s.Caps.Cpu, Keys(validTaskSizes), ecsTaskSizeDocLink)
 		}
 	} else if s.Service.Cpu != "" {
 		if cpu, err = strconv.Atoi(s.Service.Cpu); err != nil {
 			return nil, fmt.Errorf("invalid cpu value found in browser config: %s | valid values: %v | see %s", s.Service.Cpu, Keys(validTaskSizes), ecsTaskSizeDocLink)
 		}
 	} else if s.Environment.CPU > 0 {
-		cpu = int(s.Environment.CPU)
+		cpu = int(1024 * s.Environment.CPU / 1e9) // Nano cpus to milli CPUs (1024 = 1 CPU)
 	}
 	if _, ok := validTaskSizes[cpu]; !ok {
-		return nil, fmt.Errorf("invalid cpu value: %s, valid values are: %v | See %s", s.Service.Mem, Keys(validTaskSizes), ecsTaskSizeDocLink)
+		return nil, fmt.Errorf("unsupported cpu value: %d, valid values are: %v | See %s", cpu, Keys(validTaskSizes), ecsTaskSizeDocLink)
 	}
 	validMemValues := validTaskSizes[cpu]
 	if s.Caps.Mem != "" {
 		if memory, err = strconv.Atoi(s.Caps.Mem); err != nil {
-			return nil, fmt.Errorf("invalid mem value found in capabilities: %s | valid values: %v | see %s", s.Service.Cpu, validMemValues, ecsTaskSizeDocLink)
+			return nil, fmt.Errorf("invalid mem value found in capabilities: %s | valid values: %v | see %s", s.Caps.Mem, validMemValues, ecsTaskSizeDocLink)
 		}
 	} else if s.Service.Mem != "" {
 		if memory, err = strconv.Atoi(s.Service.Mem); err != nil {
-			return nil, fmt.Errorf("invalid mem value found in browser config: %s | valid values: %v | see %s", s.Service.Cpu, validMemValues, ecsTaskSizeDocLink)
+			return nil, fmt.Errorf("invalid mem value found in browser config: %s | valid values: %v | see %s", s.Service.Mem, validMemValues, ecsTaskSizeDocLink)
 		}
 	} else if s.Environment.Memory > 0 {
-		memory = int(s.Environment.Memory)
+		memory = int(s.Environment.Memory / 1024 / 1024) // bytes to MiB
 	} else {
 		memory = validMemValues[0] // valid min memory value for given cpu value
 	}
 	if !Contains(validMemValues, memory) {
-		return nil, fmt.Errorf("invalid mem value: %sMiB, For cpu=%d, valid values are %v | See %s", s.Service.Mem, cpu, validMemValues, ecsTaskSizeDocLink)
+		return nil, fmt.Errorf("unsupported mem value: %dMiB, For cpu=%d, valid values are %v | See %s", memory, cpu, validMemValues, ecsTaskSizeDocLink)
 	}
 
 	var command []*string

@@ -31,14 +31,13 @@ image: build
 
 .PHONY: run-k8s
 run-k8s:
-	go run .  -orchestrator kubernetes $$args
+	@set -x; \
+	go run . -orchestrator kubernetes $$args
 
 .PHONY: run-ecs
 run-ecs:
-	@set -e;\
-	args="--orchestrator=aws-ecs $$(sed "s/ aws-ecs/ --aws-ecs/g" <<<$${MAKEFLAGS#" --"})"; \
-	echo "$$args"; \
-	go run . $$args
+	@set -x; \
+	go run .  -orchestrator aws-ecs $$args
 
 .PHONY: run-demo
 run-demo:

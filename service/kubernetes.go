@@ -339,12 +339,12 @@ func (k *Kubernetes) getResources() apiv1.ResourceRequirements {
 		if k.Service.Cpu != "" {
 			rl[apiv1.ResourceCPU] = resource.MustParse(k.Service.Cpu)
 		} else if k.Environment.CPU != 0 {
-			rl[apiv1.ResourceCPU] = *resource.NewQuantity(k.Environment.CPU, resource.DecimalSI)
+			rl[apiv1.ResourceCPU] = *resource.NewQuantity(k.Environment.CPU/1e9, resource.DecimalSI) // nano CPUs to CPUs
 		}
 		if k.Service.Mem != "" {
 			rl[apiv1.ResourceMemory] = resource.MustParse(k.Service.Mem)
 		} else if k.Environment.Memory != 0 {
-			rl[apiv1.ResourceMemory] = *resource.NewQuantity(k.Environment.Memory*1e6, resource.BinarySI)
+			rl[apiv1.ResourceMemory] = *resource.NewQuantity(k.Environment.Memory, resource.BinarySI) // In Bytes
 		}
 		return rl
 	}
