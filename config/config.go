@@ -116,6 +116,8 @@ func (config *Config) Load(browsers, containerLogs string) error {
 	defer config.lock.Unlock()
 	config.Browsers, config.ContainerLogs = br, cl
 	config.LastReloadTime = time.Now()
+	configDump, _ := json.Marshal(config)
+	log.Printf("[-] [INIT] config: %s", configDump)
 	return nil
 }
 
