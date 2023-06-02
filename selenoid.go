@@ -748,6 +748,8 @@ func streamLogs(wsconn *websocket.Conn) {
 		if err != nil {
 			log.Printf("[%d] [%s] [STREAM_LOG_ERROR] [%s] ", requestId, sid, err)
 		}
+	} else if sess.Orchestrator == "oracle-container-instances" {
+		log.Printf("[%d] [%s] [STREAM_LOG_ERROR] [%s] ", requestId, sid, "Not implemented yet")
 	} else {
 		log.Printf("[%d] [%s] [INVALID_ORCHESTRATOR] [%s] ", requestId, sid, sess.Orchestrator)
 	}

@@ -96,10 +96,11 @@ func init() {
 	flag.StringVar(&logOutputDir, "log-output-dir", "", "Directory to save session log to")
 	flag.BoolVar(&saveAllLogs, "save-all-logs", false, "Whether to save all logs without considering capabilities")
 	flag.DurationVar(&gracefulPeriod, "graceful-period", 300*time.Second, "graceful shutdown period in time.Duration format, e.g. 300s or 500ms")
-	flag.StringVar(&orchestrator, "orchestrator", "docker", "Container orchestrator: docker,kubernetes,aws-ecs")
+	flag.StringVar(&orchestrator, "orchestrator", "docker", "Container orchestrator: docker,kubernetes,aws-ecs,oci-container-instances")
 
 	service.InitKubernetesFlags()
 	service.InitAWSElasticContainerServiceFlags()
+	service.InitOCIContainerInstancesServiceFlags()
 
 	flag.Parse()
 

@@ -29,6 +29,11 @@ image: build
 	docker build --build-arg TARGETOS=$(GOOS) --build-arg TARGETARCH=$(GOARCH) --build-arg BUILDPLATFORM=$(GOOS) --platform=linux/x86_64 -t $$tag -f Dockerfile .; \
 	read -p "Push (Y/n)?" && [[ $${REPLY,} == "y" ]] && docker push $$tag;
 
+.PHONY: run-oracle-container-instances
+run-oracle-container-instances:
+	@set -x; \
+	go run . -orchestrator oracle-container-instances $$args
+
 .PHONY: run-k8s
 run-k8s:
 	@set -x; \

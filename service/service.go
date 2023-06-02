@@ -94,6 +94,12 @@ func (m *DefaultManager) Find(caps session.Caps, requestId uint64) (Starter, boo
 				ServiceBase: serviceBase,
 				Environment: *m.Environment,
 				Caps:        caps}, true
+		case "oracle-container-instances":
+			log.Printf("[%d] [Using oracle-container-instances] [%s]", requestId, browserName)
+			return &OCIContainerInstancesService{
+				ServiceBase: serviceBase,
+				Environment: *m.Environment,
+				Caps:        caps}, true
 		case "docker":
 			if m.Client == nil {
 				return nil, false
