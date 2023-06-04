@@ -209,7 +209,7 @@ func (d *Docker) StartWithCancel() (*StartedService, error) {
 	}
 
 	serviceStartTime := time.Now()
-	err = wait(u.String(), d.StartupTimeout)
+	err = waitForEndpointReady(u.String(), d.StartupTimeout)
 	if err != nil {
 		if videoContainerId != "" {
 			stopVideoContainer(ctx, cl, requestId, videoContainerId, d.Environment)

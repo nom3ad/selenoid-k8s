@@ -20,7 +20,7 @@ build:
 	GOARCH=$(GOARCH) \
 	CGO_ENABLED=0 \
 	go build -v -ldflags=$(LDFLAGS) -o $(BUILD_OUTPUT) . && \
-	file $(BUILD_OUTPUT); ls -alh $(BUILD_OUTPUT); 
+	file $(BUILD_OUTPUT); ls -alh --block-size=K $(BUILD_OUTPUT); 
 
 .PHONY: image
 image: build

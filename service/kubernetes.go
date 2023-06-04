@@ -10,7 +10,6 @@ import (
 	"log"
 	"net/url"
 	"os"
-	"regexp"
 	"strings"
 	"time"
 
@@ -49,13 +48,7 @@ type Kubernetes struct {
 	session.Caps
 }
 
-func sanitizeStringAsValidDNSLabel(s string) string {
-	pref := regexp.MustCompile("[^a-zA-Z0-9]+")
-	s = pref.ReplaceAllString(s, "-")
-	return s
-}
-
-func yamlifyObject(o runtime.Object) string {
+func yamlifyK8sObject(o runtime.Object) string {
 	k8sObjYamlSerializer := k8sJson.NewSerializerWithOptions(
 		k8sJson.DefaultMetaFactory, nil, nil,
 		k8sJson.SerializerOptions{
@@ -68,7 +61,7 @@ func yamlifyObject(o runtime.Object) string {
 	return buf.String()
 }
 
-func jsonifyObject(o runtime.Object, pretty bool) string {
+func jsonifyK8sObject(o runtime.Object, pretty bool) string {
 	k8sObjJsonSerializer := k8sJson.NewSerializerWithOptions(
 		k8sJson.DefaultMetaFactory, nil, nil,
 		k8sJson.SerializerOptions{
@@ -194,7 +187,7 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 	}
 
 	// podYaml, _ := yaml.Marshal(v1Pod)
-	log.Printf("[%d] [CREATING_POD] [%s] [%s] Pod=%s", requestID, image, namespace, jsonifyObject(v1Pod, false))
+	log.Printf("[%d] [CREATING_POD] [%s] [%s] Pod=%s", requestID, image, namespace, jsonifyK8sObject(v1Pod, false))
 
 	podStartTime := time.Now()
 	podObj, err := k8sClient.CoreV1().Pods(namespace).Create(context.Background(), v1Pod, metav1.CreateOptions{})
@@ -218,7 +211,7 @@ func (k *Kubernetes) StartWithCancel() (*StartedService, error) {
 
 	log.Printf("[%d] [WAIT_FOR_SELENIUM_URL] [%s] [%s]", requestID, podName, u.String())
 
-	if err := wait(u.String(), k.StartupTimeout); err != nil {
+	if err := waitForEndpointReady(u.String(), k.StartupTimeout); err != nil {
 		k.deletePod(podName, namespace, k8sClient, requestID)
 	}
 
@@ -304,7 +297,7 @@ func (k *Kubernetes) waitForPodToBeReady(k8sClient *kubernetes.Clientset, namesp
 							return
 						}
 					} else {
-						log.Printf("[UNHANDLED EVENT] [Pod=%s] [%s] Obj=\n%s", podName, ev.Type, yamlifyObject(ev.Object))
+						log.Printf("[UNHANDLED EVENT] [Pod=%s] [%s] Obj=\n%s", podName, ev.Type, yamlifyK8sObject(ev.Object))
 					}
 				case <-time.After(timeout):
 					log.Printf("[WAITING FOR POD] timedout after %.2fs", timeout.Seconds())

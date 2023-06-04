@@ -116,7 +116,7 @@ func (m *DefaultManager) Find(caps session.Caps, requestId uint64) (Starter, boo
 	return nil, false
 }
 
-func wait(u string, t time.Duration) error {
+func waitForEndpointReady(u string, t time.Duration) error {
 	up := make(chan struct{})
 	done := make(chan struct{})
 	go func() {

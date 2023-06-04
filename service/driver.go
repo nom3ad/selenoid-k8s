@@ -70,7 +70,7 @@ func (d *Driver) StartWithCancel() (*StartedService, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot start process %v: %v", cmdLine, err)
 	}
-	err = wait(u.String(), d.StartupTimeout)
+	err = waitForEndpointReady(u.String(), d.StartupTimeout)
 	if err != nil {
 		d.stopProcess(cmd)
 		return nil, err

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -67,7 +68,7 @@ func firstNonEmptyString(values ...string) string {
 	return ""
 }
 
-func nonEmptyStringPtr(value string) *string {
+func nonEmptyStringPtrOrNil(value string) *string {
 	v := strings.TrimSpace(value)
 	if v == "" {
 		return nil
@@ -173,4 +174,10 @@ func Contains[T comparable](slice []T, v T) bool {
 		}
 	}
 	return false
+}
+
+func sanitizeStringAsValidDNSLabel(s string) string {
+	pref := regexp.MustCompile("[^a-zA-Z0-9]+")
+	s = pref.ReplaceAllString(s, "-")
+	return s
 }
